@@ -1,0 +1,62 @@
+# My Exp in production (example). On the server, next to this file: a .env based on env.example.
+# PostgreSQL and Qdrant already run on the shared Docker network "app-network" (see docs/deployment.md).
+#
+# No service publishes a port: Caddy (caddy-compose.yml) terminates HTTPS and forwards to the
+# frontend; the frontend calls the API server-side (http://myexp-api:8000). The browser never
+# calls the API.
+name: myexp
+
+# Built and pushed by CI for linux/arm64 (the server is an ARM VM).
+x-api-image: &api-image registry.example.com/myexp-api:latest
+
+services:
+  api:
+    image: *api-image
+    container_name: myexp-api
+    env_file:
+      - .env
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: "0.5"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - app-network
+
+  # Same image as the API, different command: reads, validates and indexes uploaded documents.
+  worker:
+    image: *api-image
+    container_name: myexp-worker
+    command: ["python", "-m", "worker"]
+    env_file:
+      - .env
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: "0.5"
+    networks:
+      - app-network
+
+  web:
+    image: registry.example.com/myexp-web:latest
+    container_name: myexp-web
+    # Only what the frontend needs: the API secrets never reach this container.
+    environment:
+      API_URL: http://myexp-api:8000
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      DEV_LOGIN_ENABLED: "false"
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: "0.5"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    external: true

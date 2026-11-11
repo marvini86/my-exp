@@ -1,0 +1,68 @@
+# Example only: NOT active in this repository (its CI just runs the tests, see
+# .github/workflows/ci.yml). This is the shape of the production pipeline, one per app
+# (this one for API + worker; the frontend one is the same with ./web and service "web").
+#
+# To use it, copy it to .github/workflows/ and create the repository secrets:
+# DOCKER_REGISTRY, DOCKER_USERNAME, DOCKER_PASSWORD, VPS_HOST, VPS_USER, VPS_SSH_PRIVATE_KEY.
+name: API + Worker deploy
+
+on:
+  push:
+    branches: [main]
+    paths: ['api/**']
+
+# One deploy at a time: two quick pushes never overlap.
+concurrency:
+  group: api-deploy
+  cancel-in-progress: false
+
+jobs:
+  # (tests job: the same as in ci.yml; build-and-push declares `needs: tests`)
+
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The server is ARM (Ampere): the image is built for linux/arm64 under QEMU.
+      # Heavy steps that do not depend on the target (npm ci / next build in web/Dockerfile)
+      # run on $BUILDPLATFORM, natively; Node under QEMU crashes with "Illegal instruction".
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.DOCKER_REGISTRY }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./api
+          file: ./api/Dockerfile
+          platforms: linux/arm64
+          push: true
+          cache-from: type=gha,scope=myexp-api
+          cache-to: type=gha,mode=max,scope=myexp-api
+          # :latest for the compose file; :sha to roll back to a previous version
+          tags: |
+            ${{ secrets.DOCKER_REGISTRY }}/myexp-api:latest
+            ${{ secrets.DOCKER_REGISTRY }}/myexp-api:${{ github.sha }}
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment: production
+    steps:
+      # Only this app's services are replaced; the frontend keeps running.
+      - uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd /opt/apps/myexp
+            docker compose pull api worker
+            docker compose up -d api worker
+            docker image prune -f

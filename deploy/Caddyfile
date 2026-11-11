@@ -1,0 +1,9 @@
+{
+	# Let's Encrypt notices (e.g. a certificate close to expiring that could not be renewed).
+	email you@example.com
+}
+
+myexp.example.com {
+	encode zstd gzip
+	reverse_proxy myexp-web:3000
+}

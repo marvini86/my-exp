@@ -1,0 +1,29 @@
+# HTTPS reverse proxy for the server (Let's Encrypt certificates issued and renewed by Caddy).
+# Shared by every app on "app-network": adding an app is one more block in the Caddyfile.
+name: caddy
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"        # only to issue/renew the certificate and redirect to HTTPS
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro,Z   # :Z for SELinux (Oracle Linux)
+      - caddy-data:/data                        # certificates: do not delete
+      - caddy-config:/config
+    mem_limit: 128m
+    cpus: "0.25"
+    networks:
+      - app-network
+
+volumes:
+  caddy-data:
+  caddy-config:
+
+networks:
+  app-network:
+    external: true

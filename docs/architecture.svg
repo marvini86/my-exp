@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" font-family="Inter, 'Segoe UI', Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="av" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/>
+    </marker>
+    <filter id="s" x="-5%" y="-5%" width="110%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="1000" fill="#f8fafc"/>
+
+  <!-- Título -->
+  <text x="40" y="62" font-size="34" font-weight="700" fill="#0f172a">My Exp · architecture</text>
+  <text x="40" y="94" font-size="18" fill="#475569">AI expense assistant — from a receipt photo to a cited answer</text>
+
+  <!-- Usuário -->
+  <g filter="url(#s)">
+    <rect x="40" y="400" width="220" height="120" rx="16" fill="#fff" stroke="#cbd5e1"/>
+  </g>
+  <text x="150" y="448" font-size="22" font-weight="700" fill="#0f172a" text-anchor="middle">User</text>
+  <text x="150" y="476" font-size="15" fill="#475569" text-anchor="middle">phone or browser</text>
+  <text x="150" y="498" font-size="15" fill="#475569" text-anchor="middle">receipt photo · question</text>
+
+  <!-- Google -->
+  <g filter="url(#s)">
+    <rect x="40" y="170" width="220" height="110" rx="16" fill="#fff" stroke="#cbd5e1"/>
+  </g>
+  <text x="150" y="214" font-size="20" font-weight="700" fill="#0f172a" text-anchor="middle">Google</text>
+  <text x="150" y="240" font-size="15" fill="#475569" text-anchor="middle">Identity Services</text>
+  <text x="150" y="262" font-size="15" fill="#475569" text-anchor="middle">login (ID token)</text>
+  <line x1="150" y1="400" x2="150" y2="284" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- Oracle Cloud -->
+  <rect x="300" y="130" width="760" height="660" rx="22" fill="#fff7ed" stroke="#ea580c" stroke-width="2"/>
+  <text x="324" y="166" font-size="20" font-weight="700" fill="#9a3412">Oracle Cloud · VPS ARM (Ampere) · Docker</text>
+  <text x="324" y="190" font-size="14" fill="#9a3412">only HTTPS is exposed; API, worker and databases on the internal network</text>
+
+  <!-- linha 1 -->
+  <g filter="url(#s)">
+    <rect x="324" y="214" width="200" height="96" rx="14" fill="#fff" stroke="#cbd5e1"/>
+    <rect x="566" y="214" width="220" height="96" rx="14" fill="#fff" stroke="#cbd5e1"/>
+    <rect x="828" y="214" width="208" height="96" rx="14" fill="#fff" stroke="#cbd5e1"/>
+  </g>
+  <text x="424" y="252" font-size="19" font-weight="700" fill="#0f172a" text-anchor="middle">Caddy</text>
+  <text x="424" y="278" font-size="14" fill="#475569" text-anchor="middle">automatic HTTPS</text>
+  <text x="424" y="297" font-size="14" fill="#475569" text-anchor="middle">(Let's Encrypt)</text>
+  <text x="676" y="252" font-size="19" font-weight="700" fill="#0f172a" text-anchor="middle">Next.js</text>
+  <text x="676" y="278" font-size="14" fill="#475569" text-anchor="middle">Server Components</text>
+  <text x="676" y="297" font-size="14" fill="#475569" text-anchor="middle">tokens in httpOnly cookies</text>
+  <text x="932" y="252" font-size="19" font-weight="700" fill="#0f172a" text-anchor="middle">FastAPI</text>
+  <text x="932" y="278" font-size="14" fill="#475569" text-anchor="middle">API · access rules</text>
+  <text x="932" y="297" font-size="14" fill="#475569" text-anchor="middle">rate limiting · citations</text>
+  <line x1="262" y1="440" x2="322" y2="290" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="524" y1="262" x2="562" y2="262" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="786" y1="262" x2="824" y2="262" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- linha 2 -->
+  <g filter="url(#s)">
+    <rect x="324" y="350" width="236" height="104" rx="14" fill="#fff" stroke="#cbd5e1"/>
+    <rect x="590" y="350" width="196" height="104" rx="14" fill="#fff" stroke="#cbd5e1"/>
+    <rect x="828" y="350" width="208" height="104" rx="14" fill="#fff" stroke="#cbd5e1"/>
+  </g>
+  <text x="442" y="386" font-size="19" font-weight="700" fill="#0f172a" text-anchor="middle">PostgreSQL</text>
+  <text x="442" y="411" font-size="14" fill="#475569" text-anchor="middle">Row-Level Security</text>
+  <text x="442" y="431" font-size="14" fill="#475569" text-anchor="middle">per family · job queue</text>
+  <text x="688" y="386" font-size="19" font-weight="700" fill="#0f172a" text-anchor="middle">Qdrant</text>
+  <text x="688" y="411" font-size="14" fill="#475569" text-anchor="middle">semantic search</text>
+  <text x="688" y="431" font-size="14" fill="#475569" text-anchor="middle">vectors per account</text>
+  <text x="932" y="386" font-size="19" font-weight="700" fill="#0f172a" text-anchor="middle">Worker</text>
+  <text x="932" y="411" font-size="14" fill="#475569" text-anchor="middle">reads, validates and</text>
+  <text x="932" y="431" font-size="14" fill="#475569" text-anchor="middle">indexes the receipts</text>
+  <line x1="900" y1="310" x2="520" y2="348" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="932" y1="310" x2="732" y2="348" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="826" y1="420" x2="788" y2="420" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- pipelines de IA -->
+  <rect x="324" y="490" width="712" height="134" rx="14" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="344" y="522" font-size="17" font-weight="700" fill="#5b21b6">Receipt reading (worker)</text>
+  <text x="344" y="550" font-size="15" fill="#3b0764">photo → vision LLM → validated JSON (Pydantic) → access key and tax ID</text>
+  <text x="344" y="574" font-size="15" fill="#3b0764">checked by check digit → quality gate: do the items add up to the total?</text>
+  <text x="344" y="598" font-size="15" fill="#3b0764">if not, another model re-reads → auto category → embeddings in Qdrant</text>
+
+  <rect x="324" y="640" width="712" height="130" rx="14" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="344" y="672" font-size="17" font-weight="700" fill="#5b21b6">Chat question (API)</text>
+  <text x="344" y="700" font-size="15" fill="#3b0764">LLM plans (intent + parameters, never SQL) → fixed SQL computes the numbers</text>
+  <text x="344" y="724" font-size="15" fill="#3b0764">under RLS → LLM writes the answer → code verifies the [D1] [D2] citations</text>
+  <text x="344" y="748" font-size="15" fill="#3b0764">which link to the original receipt</text>
+
+  <!-- IA -->
+  <rect x="1100" y="130" width="460" height="460" rx="22" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+  <text x="1124" y="168" font-size="20" font-weight="700" fill="#5b21b6">Free AI · router with fallback</text>
+  <text x="1124" y="192" font-size="14" fill="#5b21b6">pauses per model/provider; a daily limit postpones the job</text>
+  <g filter="url(#s)">
+    <rect x="1124" y="214" width="412" height="74" rx="12" fill="#fff" stroke="#ddd6fe"/>
+    <rect x="1124" y="300" width="412" height="74" rx="12" fill="#fff" stroke="#ddd6fe"/>
+    <rect x="1124" y="386" width="412" height="74" rx="12" fill="#fff" stroke="#ddd6fe"/>
+    <rect x="1124" y="472" width="412" height="74" rx="12" fill="#fff" stroke="#ddd6fe"/>
+  </g>
+  <text x="1146" y="244" font-size="18" font-weight="700" fill="#0f172a">Google Gemini</text>
+  <text x="1146" y="270" font-size="14" fill="#475569">vision (receipt reading) · embeddings</text>
+  <text x="1146" y="330" font-size="18" font-weight="700" fill="#0f172a">Groq</text>
+  <text x="1146" y="356" font-size="14" fill="#475569">fast chat (plan and write) · backup vision</text>
+  <text x="1146" y="416" font-size="18" font-weight="700" fill="#0f172a">Cloudflare Workers AI</text>
+  <text x="1146" y="442" font-size="14" fill="#475569">backup chat and vision · embeddings</text>
+  <text x="1146" y="502" font-size="18" font-weight="700" fill="#0f172a">OpenRouter</text>
+  <text x="1146" y="528" font-size="14" fill="#475569">last resort (:free models)</text>
+  <line x1="1038" y1="555" x2="1096" y2="470" stroke="#7c3aed" stroke-width="2.5" marker-end="url(#av)"/>
+  <line x1="1038" y1="700" x2="1096" y2="560" stroke="#7c3aed" stroke-width="2.5" marker-end="url(#av)"/>
+
+  <!-- Azure -->
+  <g filter="url(#s)">
+    <rect x="1100" y="630" width="460" height="160" rx="22" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  </g>
+  <text x="1124" y="668" font-size="20" font-weight="700" fill="#1e40af">Microsoft Azure</text>
+  <text x="1124" y="700" font-size="16" fill="#1e3a8a">Blob Storage: original photos and PDFs</text>
+  <text x="1124" y="726" font-size="15" fill="#1e3a8a">private container · temporary SAS links</text>
+  <text x="1124" y="752" font-size="15" fill="#1e3a8a">(the source link opens the original receipt)</text>
+  <line x1="1038" y1="300" x2="1096" y2="680" stroke="#2563eb" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#a)"/>
+
+  <!-- CI/CD -->
+  <g filter="url(#s)">
+    <rect x="300" y="830" width="1260" height="120" rx="22" fill="#fff" stroke="#cbd5e1"/>
+  </g>
+  <text x="324" y="870" font-size="20" font-weight="700" fill="#0f172a">GitHub Actions</text>
+  <text x="324" y="902" font-size="16" fill="#475569">tests (500+ with real PostgreSQL and Qdrant) → ARM Docker images → registry → SSH deploy</text>
+  <text x="324" y="928" font-size="16" fill="#475569">outside CI: evals with the real AI — 37 questions with known answers and degraded photos (rotated, blurred, dark)</text>
+  <line x1="680" y1="828" x2="680" y2="794" stroke="#475569" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- rodapé -->
+  <text x="40" y="975" font-size="14" fill="#64748b">Python · FastAPI · SQLAlchemy · Next.js · TypeScript · PostgreSQL · Qdrant · LangChain · Docker</text>
+</svg>

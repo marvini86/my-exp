@@ -24,6 +24,13 @@ The product (UI, prompts, documents) is in Brazilian Portuguese; the code and do
 
 ## Architecture
 
+![Architecture](docs/architecture.svg)
+
+How it runs in production (Oracle Cloud ARM VM, Docker, Caddy, Azure Blob, GitHub Actions):
+[docs/deployment.md](docs/deployment.md).
+
+Inside the code:
+
 ```
             ┌──────────────────────┐   server-side only   ┌──────────────────────────────┐
 browser ───►│ Next.js (App Router) │─────────────────────►│ FastAPI                      │
@@ -61,7 +68,7 @@ browser ───►│ Next.js (App Router) │──────────�
   a short grace window for parallel requests) instead of JWT, so logout/revocation is immediate.
 - **The browser never talks to the API.** Next.js calls FastAPI server-side; tokens live in
   httpOnly cookies; the API has no public port in the Docker deployment.
-- **Evaluations with the real AI**, separate from unit tests: 31 assistant questions over a
+- **Evaluations with the real AI**, separate from unit tests: 37 assistant questions over a
   fixed dataset, and receipt photos degraded 6 ways (rotated, tilted, dark, blurred...).
   → `api/evals/`
 
@@ -79,6 +86,8 @@ openapi-fetch (types generated from the API contract), Vitest.
 |---|---|
 | [`api/`](api/README.md) | FastAPI backend + ingestion worker, migrations, tests, evals |
 | [`web/`](web) | Next.js frontend |
+| [`deploy/`](deploy) | Production configuration examples (Docker Compose, Caddy, environment) |
+| [`docs/`](docs) | Deployment guide and architecture diagram |
 
 ## Running locally
 
