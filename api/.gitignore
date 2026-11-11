@@ -1,0 +1,24 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+
+# Locally uploaded files (ingestion prototype)
+uploads/
+
+# Evaluations with the real AI: real photos and results stay on the local machine
+evals/data/
+evals/results/

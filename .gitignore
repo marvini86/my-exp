@@ -1,0 +1,9 @@
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Copies of a production database (real data): local only, never in Git
+local-data/
+*.dump

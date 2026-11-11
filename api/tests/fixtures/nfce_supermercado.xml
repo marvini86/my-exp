@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35240112345678000190650010000123451000123456" versao="4.00">
+      <ide>
+        <cUF>35</cUF>
+        <mod>65</mod>
+        <serie>1</serie>
+        <nNF>12345</nNF>
+        <dhEmi>2024-01-10T18:32:15-03:00</dhEmi>
+      </ide>
+      <emit>
+        <CNPJ>12345678000190</CNPJ>
+        <xNome>SUPERMERCADO EXEMPLO LTDA</xNome>
+        <xFant>Mercado Exemplo</xFant>
+      </emit>
+      <det nItem="1">
+        <prod>
+          <cProd>1001</cProd>
+          <cEAN>7891000100103</cEAN>
+          <xProd>LEITE INTEGRAL 1L</xProd>
+          <NCM>04012010</NCM>
+          <uCom>UN</uCom>
+          <qCom>6.0000</qCom>
+          <vUnCom>4.8900000000</vUnCom>
+          <vProd>29.34</vProd>
+        </prod>
+      </det>
+      <det nItem="2">
+        <prod>
+          <cProd>2002</cProd>
+          <cEAN>7896006716112</cEAN>
+          <xProd>ARROZ TIPO 1 5KG</xProd>
+          <NCM>10063021</NCM>
+          <uCom>UN</uCom>
+          <qCom>1.0000</qCom>
+          <vUnCom>27.9000000000</vUnCom>
+          <vProd>27.90</vProd>
+          <vDesc>2.00</vDesc>
+        </prod>
+      </det>
+      <det nItem="3">
+        <prod>
+          <cProd>3003</cProd>
+          <cEAN>SEM GTIN</cEAN>
+          <xProd>PAO FRANCES KG</xProd>
+          <NCM>19052090</NCM>
+          <uCom>KG</uCom>
+          <qCom>0.5120</qCom>
+          <vUnCom>15.9900000000</vUnCom>
+          <vProd>8.19</vProd>
+        </prod>
+      </det>
+      <total>
+        <ICMSTot>
+          <vProd>65.43</vProd>
+          <vDesc>2.00</vDesc>
+          <vNF>63.43</vNF>
+        </ICMSTot>
+      </total>
+      <pag>
+        <detPag>
+          <tPag>17</tPag>
+          <vPag>63.43</vPag>
+        </detPag>
+      </pag>
+    </infNFe>
+  </NFe>
+  <protNFe versao="4.00">
+    <infProt>
+      <cStat>100</cStat>
+      <xMotivo>Autorizado o uso da NF-e</xMotivo>
+    </infProt>
+  </protNFe>
+</nfeProc>

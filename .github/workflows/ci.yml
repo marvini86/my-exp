@@ -1,0 +1,104 @@
+name: CI
+
+# Tests only (no build/deploy): API with PostgreSQL + Qdrant, and the web app.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  api:
+    name: API tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: myexp_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d myexp_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      qdrant:
+        image: qdrant/qdrant:v1.20.0
+        ports:
+          - 6333:6333
+
+    # Placeholder values: the tests never call external services (AI, Azure).
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_NAME: myexp_test
+      DB_USER: myexp_app
+      DB_PASSWORD: app_test_pw
+      QDRANT_URL: http://127.0.0.1:6333
+      OPENROUTER_API_KEY: ci-placeholder
+      FILES_CONTAINER: ci/test
+      STG_ACCOUNT_NAME: ci
+      STG_ACCOUNT_KEY: Y2k=
+      TEST_DATABASE_URL: postgresql+psycopg://myexp_app:app_test_pw@127.0.0.1:5432/myexp_test
+      TEST_ADMIN_DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/myexp_test
+      TEST_WORKER_DATABASE_URL: postgresql+psycopg://myexp_worker:worker_test_pw@127.0.0.1:5432/myexp_test
+      TEST_QDRANT: '1'
+      MIGRATE_VERSION: v4.19.1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: api/requirements*.txt
+
+      - name: Install dependencies
+        working-directory: ./api
+        run: pip install -r requirements-dev.txt
+
+      - name: Apply migrations
+        working-directory: ./api
+        run: |
+          curl -sSL "https://github.com/golang-migrate/migrate/releases/download/${MIGRATE_VERSION}/migrate.linux-amd64.tar.gz" | tar -xz migrate
+          ./migrate -path migrations -database "postgres://postgres:postgres@127.0.0.1:5432/myexp_test?sslmode=disable" up
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d myexp_test -c \
+            "ALTER ROLE myexp_app WITH PASSWORD 'app_test_pw'; ALTER ROLE myexp_worker WITH PASSWORD 'worker_test_pw';"
+
+      - name: Run tests
+        working-directory: ./api
+        run: python -m pytest -q
+
+  web:
+    name: Web checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./web
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: ./web
+        run: npm run typecheck
+
+      - name: Lint
+        working-directory: ./web
+        run: npm run lint
+
+      - name: Tests
+        working-directory: ./web
+        run: npm test
