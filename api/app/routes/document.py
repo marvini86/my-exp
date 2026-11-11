@@ -99,6 +99,17 @@ def reprocess_document(
     return service.reprocess(context, document_id)
 
 
+@router.post("/{document_id}/review", response_model=DocumentDetailResponse)
+def confirm_document_review(
+    document_id: UUID,
+    context: AccountContext = Depends(get_account_context),
+    service: DocumentService = Depends(get_document_service),
+    session: Session = Depends(get_db),
+) -> DocumentDetailResponse:
+    """Confirms a reading pending review: the entry goes back into the totals."""
+    return service.confirm_review(context, document_id, FinancialEntryRepository(session))
+
+
 @router.delete("/{document_id}", status_code=HTTPStatus.NO_CONTENT)
 def delete_document(
     document_id: UUID,

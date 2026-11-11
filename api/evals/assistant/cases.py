@@ -76,6 +76,14 @@ CASES: list[Case] = [
     Case("castanha", (ask("quanto paguei na castanha de caju?", include="27,74"),), ("produto", "abreviacao")),
     Case("nota-do-tomate", (ask("me dá a nota em que comprei tomate salada", include_any=("sendas", "rcarvalho"), citations=1),), ("produto", "documento")),
     Case("limpeza", (ask("quais produtos de limpeza eu comprei?", include_any=("detergente", "urca", "sabte", "sabonete")),), ("produto", "categoria")),
+    # From production chats (11/2026): abbreviated names and product groups.
+    # Chicken = 6 lines of "CSCOX LAR C/DORSO" (7.35 + 9.45 + 8.19 + 7.69 + 8.04 + 10.05).
+    Case("frango-abreviado", (ask("quanto gastei com frango este mês?", include="50,77", intent="price_history"),), ("produto", "abreviacao")),
+    # Milk = LEITE ITALAC 1L (5.69) + LTE INT ITALAC 1L CT (6.25); nothing from October.
+    Case("leite-abreviado", (ask("quanto gastei de leite este mês?", include="11,94", exclude="10,98"),), ("produto", "abreviacao")),
+    Case("legumes", (ask("qt gastei de legumes esse mês?", include=("chuchu", "repolho"), intent="price_history"),), ("produto", "categoria")),
+    Case("itens-da-nota", (ask("me mostra os produtos da última nota do Sendas", include=("cscox", "urca"), intent="list_documents"),), ("documento",)),
+    Case("mais-caros", (ask("quais produtos ficaram mais caros?", include_any=("banana", "tomate salada"), intent="price_changes"),), ("preco",)),
     # --- Rankings -----------------------------------------------------------------------
     Case("itens-caros-ontem", (ask("quais itens foram mais caros na compra de ontem?", include="43,58", exclude="53,04", intent="top_items"),), ("ranking",)),
     Case("mais-gastei-mes", (ask("com o que mais gastei este mês?", include=("53,04", "50,77"), intent="top_items"),), ("ranking",)),
@@ -85,6 +93,8 @@ CASES: list[Case] = [
     Case("luz-comparar", (ask("compare minhas contas de luz", include=("612,40", "729,08")),), ("contas",)),
     Case("luz-vencida", (ask("tenho alguma conta de luz para pagar?", include=("729,08", "vencid")),), ("contas", "vencimento")),
     Case("contas-da-casa", (ask("quanto gastei com contas da casa em outubro?", include="743,82"),), ("contas", "categoria")),
+    # Production: "contas da casa a pagar" became only the electricity bill of the current month.
+    Case("contas-a-pagar", (ask("quais contas da casa eu tenho que pagar esse mês?", include=("131,42", "12/11")),), ("contas", "vencimento")),
     # --- Document details (semantic search) ----------------------------------------
     Case("desconto-sendas", (ask("qual foi o desconto na compra do Sendas?", include="3,78"),), ("documento",)),
     Case("cnpj-sendas", (ask("qual o CNPJ do Sendas?", include="06.057.223/0461-63"),), ("documento",)),

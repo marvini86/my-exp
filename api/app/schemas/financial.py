@@ -28,6 +28,8 @@ class EntryResponse(BaseModel):
     due_date: date | None
     paid_at: datetime | None
     payment_status: PaymentStatus
+    # Doubtful reading: shown in lists, but left out of every total until confirmed.
+    needs_review: bool = False
 
 
 class EntryPage(BaseModel):
@@ -76,6 +78,8 @@ class SummaryResponse(BaseModel):
     top_products: list[GroupTotalResponse]
     # Unpaid, overdue in the last 30 days or due in the next 30.
     open_bills: list[EntryResponse]
+    # Receipts with a doubtful reading that are not in the numbers yet.
+    pending_review: int = 0
 
 
 class PriceStatsResponse(BaseModel):

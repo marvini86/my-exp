@@ -18,6 +18,7 @@ Final errors:
 
 import json
 import logging
+import re
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone, tzinfo
@@ -229,6 +230,11 @@ class LLMRouter:
         text = message_text(self._call(self._llm(model.id), messages, model)).strip()
         if not text:
             raise _ModelFailure("invalid_output", _INVALID_OUTPUT_COOLDOWN, f"{model.id} returned an empty answer")
+        if is_degenerate(text):
+            # Never log the content (financial data): only the size.
+            raise _ModelFailure(
+                "invalid_output", _INVALID_OUTPUT_COOLDOWN, f"{model.id} returned a degenerate answer ({len(text)} chars)"
+            )
         return text
 
     def _call(self, runnable: Any, messages: list, model: ModelInfo) -> Any:
@@ -289,6 +295,16 @@ class LLMRouter:
 
     def _seconds_until_utc_midnight(self) -> float:
         return self._seconds_until_reset("openrouter")
+
+
+# Seen in production: the reasoning leaked ("analysis: We have a user query...") and the model got stuck
+# in a loop ("Ter Ter Ter ..." thousands of times). An answer like that is a model failure: try the next one.
+_REASONING_LEAK = re.compile(r"^\s*(analysis|reasoning|thinking)\s*:", re.IGNORECASE)
+_REPEATED_WORD = re.compile(r"(\b\S{1,30}\b)(?:\s+\1\b){24,}")
+
+
+def is_degenerate(text: str) -> bool:
+    return bool(_REASONING_LEAK.match(text) or _REPEATED_WORD.search(text))
 
 
 def seconds_until_daily_reset(provider: str, now: datetime) -> float:

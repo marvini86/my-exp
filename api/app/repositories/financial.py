@@ -1,3 +1,5 @@
+from datetime import date
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import delete, select, update
@@ -50,6 +52,29 @@ class FinancialRepository:
                 FinancialEntry.metadata_["establishment_tax_id"].astext == tax_id,
             )
             .values(establishment=name)
+        )
+
+    def possible_duplicate(
+        self, account_id: UUID, tax_id: str, occurred_at: date, amount: Decimal, exclude_document_id: UUID
+    ) -> UUID | None:
+        """Receipt without an access key: another one with the same tax ID, date and amount is probably the same."""
+        return self.session.scalars(
+            select(FinancialEntry.document_id).where(
+                FinancialEntry.account_id == account_id,
+                FinancialEntry.metadata_["establishment_tax_id"].astext == tax_id,
+                FinancialEntry.occurred_at == occurred_at,
+                FinancialEntry.amount == amount,
+                FinancialEntry.document_id.is_not(None),
+                FinancialEntry.document_id != exclude_document_id,
+            )
+        ).first()
+
+    def confirm_review(self, account_id: UUID, document_id: UUID) -> None:
+        """Amounts checked by someone in the account: the entry goes back into the totals."""
+        self.session.execute(
+            update(FinancialEntry)
+            .where(FinancialEntry.account_id == account_id, FinancialEntry.document_id == document_id)
+            .values(needs_review=False)
         )
 
     def add_entry(self, entry: FinancialEntry, items: list[DocumentItem]) -> FinancialEntry:

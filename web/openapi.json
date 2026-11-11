@@ -1973,6 +1973,98 @@
         }
       }
     },
+    "/accounts/{account_id}/documents/{document_id}/review": {
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Confirm Document Review",
+        "description": "Confirms a reading pending review: the entry goes back into the totals.",
+        "operationId": "confirm_document_review_accounts__account_id__documents__document_id__review_post",
+        "security": [
+          {
+            "Bearer": []
+          },
+          {
+            "DevUser": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Document Id"
+            }
+          },
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentDetailResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden (insufficient role)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (or an account you are not a member of)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/accounts/{account_id}/documents/{document_id}/download": {
       "get": {
         "tags": [
@@ -3753,6 +3845,23 @@
             ],
             "title": "Next Attempt At"
           },
+          "needs_review": {
+            "type": "boolean",
+            "title": "Needs Review",
+            "default": false
+          },
+          "duplicate_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicate Of"
+          },
           "entries": {
             "items": {
               "$ref": "#/components/schemas/EntryResponse"
@@ -3766,6 +3875,14 @@
             },
             "type": "array",
             "title": "Items"
+          },
+          "review_reasons": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewReason"
+            },
+            "type": "array",
+            "title": "Review Reasons",
+            "default": []
           }
         },
         "type": "object",
@@ -4010,6 +4127,23 @@
               }
             ],
             "title": "Next Attempt At"
+          },
+          "needs_review": {
+            "type": "boolean",
+            "title": "Needs Review",
+            "default": false
+          },
+          "duplicate_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicate Of"
           }
         },
         "type": "object",
@@ -4192,6 +4326,11 @@
           },
           "payment_status": {
             "$ref": "#/components/schemas/PaymentStatus"
+          },
+          "needs_review": {
+            "type": "boolean",
+            "title": "Needs Review",
+            "default": false
           }
         },
         "type": "object",
@@ -4777,6 +4916,83 @@
         ],
         "title": "RefreshRequest"
       },
+      "ReviewReason": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "items_total_mismatch",
+              "item_count_mismatch",
+              "possible_duplicate"
+            ],
+            "title": "Code"
+          },
+          "items_total": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items Total"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "read": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read"
+          },
+          "printed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printed"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "ReviewReason",
+        "description": "Why the reading is pending. The interface builds the message from the code."
+      },
       "SearchResponse": {
         "properties": {
           "query": {
@@ -4915,6 +5131,11 @@
             },
             "type": "array",
             "title": "Open Bills"
+          },
+          "pending_review": {
+            "type": "integer",
+            "title": "Pending Review",
+            "default": 0
           }
         },
         "type": "object",

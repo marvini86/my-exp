@@ -18,9 +18,16 @@ class FakeLLMRouter:
     def __init__(self) -> None:
         self.plans: list = []
         self.answers: list = []
+        self.item_choices: list[list[int]] = []
         self.calls: list[str] = []
 
     def structured(self, messages, schema, *, needs_vision=False):
+        if schema is not QueryPlan:
+            # Item selector: with no scripted choice, the AI "did not answer" (text search is used).
+            self.calls.append("items")
+            if not self.item_choices:
+                raise LLMOutputError("no item choice scripted")
+            return schema(matches=self.item_choices.pop(0)), "fake/items"
         self.calls.append("plan")
         item = self.plans.pop(0)
         if isinstance(item, Exception):
@@ -102,6 +109,43 @@ def test_price_question_end_to_end(client, llm, family):
     assert answer["citations"][0]["document_id"] == str(family["doc"].id)
     # The LLM received the facts already computed by SQL.
     assert "R$ 4,89" in llm.last_answer_prompt and "Mercado Exemplo" in llm.last_answer_prompt
+
+
+def test_product_chosen_from_the_account_vocabulary(client, llm, family, session):
+    """'frango' (chicken) is not in the item name: the AI choice over the account vocabulary finds it."""
+    add_purchase(session, UUID(family["id"]), doc_type="nfce", establishment="SENDAS", amount="18.24",
+                 day=date(2026, 10, 12), items=[("CSCOX LAR C/DORSO", "8.19", "1"), ("CR LEITE TP 200G", "2.99", "1")])
+    conversation = new_conversation(client, family)
+    llm.plans.append(QueryPlan(intent=Intent.PRICE_HISTORY, product="frango"))
+    # Vocabulary: most recent first, then alphabetical → 1 = CR LEITE TP 200G, 2 = CSCOX LAR C/DORSO.
+    llm.item_choices.append([2])
+    llm.answers.append("Frango: R$ 8,19 [D1].")
+
+    ask(client, family, conversation, "quanto gastei com frango?")
+
+    assert llm.calls == ["plan", "items", "answer"]
+    assert "CSCOX LAR C/DORSO" in llm.last_answer_prompt and "itens_considerados" in llm.last_answer_prompt
+    assert "CR LEITE" not in llm.last_answer_prompt
+
+
+def test_follow_up_planner_receives_the_previous_plan(client, llm, family):
+    conversation = new_conversation(client, family)
+    llm.plans += [QueryPlan(intent=Intent.PRICE_HISTORY, product="legumes", start_date=date(2026, 10, 1),
+                            end_date=date(2026, 10, 31)), QueryPlan(intent=Intent.SPENDING_SUMMARY)]
+    llm.answers += ["Nada.", "Ok."]
+    captured = []
+    original = llm.structured
+
+    def spy(messages, schema, **kwargs):
+        if schema is QueryPlan:
+            captured.append(messages[1].content)
+        return original(messages, schema, **kwargs)
+
+    llm.structured = spy
+    ask(client, family, conversation, "qt gastei de legumes em outubro?")
+    ask(client, family, conversation, "legumes são tomate, cebola etc")
+
+    assert '"product": "legumes"' in captured[1] and '"start_date": "2026-10-01"' in captured[1]
 
 
 def test_messages_are_persisted_and_conversation_titled(client, llm, family):

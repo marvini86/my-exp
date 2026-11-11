@@ -68,6 +68,20 @@ export async function reprocessDocument(_: DocumentActionState, form: FormData):
   return {};
 }
 
+/** Confirms a reading pending review: the entry goes back into the totals. */
+export async function confirmReview(_: DocumentActionState, form: FormData): Promise<DocumentActionState> {
+  const target = ids(form);
+  if (!target) return { message: "Documento inválido." };
+  const result = await attempt(
+    (await api()).POST("/accounts/{account_id}/documents/{document_id}/review", {
+      params: { path: { account_id: target.accountId, document_id: target.documentId } },
+    }),
+  );
+  if (result.error) return { message: result.error.message };
+  revalidatePath(`/c/${target.accountId}`, "layout");
+  return {};
+}
+
 /** Deletes the document and everything derived from it; goes back to the list. */
 export async function deleteDocument(_: DocumentActionState, form: FormData): Promise<DocumentActionState> {
   const target = ids(form);

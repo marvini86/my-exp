@@ -1,27 +1,30 @@
 "use client";
 
-import { RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, RotateCcw, Trash2 } from "lucide-react";
 import { useActionState } from "react";
 
 import { SubmitButton } from "@/components/SubmitButton";
 import { Alert, buttonClass } from "@/components/ui";
-import { deleteDocument, reprocessDocument, type DocumentActionState } from "../actions";
+import { confirmReview, deleteDocument, reprocessDocument, type DocumentActionState } from "../actions";
 
-/** Reprocess / delete. Delete asks for confirmation (no modal: one more step on the page itself). */
+/** Confirm reading / process again / delete. Delete asks for confirmation (no modal: one extra step on the page itself). */
 export function DocumentActions({
   accountId,
   documentId,
   canReprocess,
   canDelete,
+  canConfirm = false,
 }: {
   accountId: string;
   documentId: string;
   canReprocess: boolean;
   canDelete: boolean;
+  canConfirm?: boolean;
 }) {
   const [reprocessState, reprocess] = useActionState<DocumentActionState, FormData>(reprocessDocument, {});
   const [deleteState, remove] = useActionState<DocumentActionState, FormData>(deleteDocument, {});
-  if (!canReprocess && !canDelete) return null;
+  const [confirmState, confirm] = useActionState<DocumentActionState, FormData>(confirmReview, {});
+  if (!canReprocess && !canDelete && !canConfirm) return null;
 
   const hidden = (
     <>
@@ -33,6 +36,14 @@ export function DocumentActions({
   return (
     <div className="mb-6 space-y-3">
       <div className="flex flex-wrap items-start gap-2">
+        {canConfirm && (
+          <form action={confirm}>
+            {hidden}
+            <SubmitButton pendingLabel="Confirmando…">
+              <CheckCircle2 size={16} aria-hidden /> Confirmar valores
+            </SubmitButton>
+          </form>
+        )}
         {canReprocess && (
           <form action={reprocess}>
             {hidden}
@@ -56,6 +67,7 @@ export function DocumentActions({
           </details>
         )}
       </div>
+      {confirmState.message && <Alert>{confirmState.message}</Alert>}
       {reprocessState.message && <Alert>{reprocessState.message}</Alert>}
       {deleteState.message && <Alert>{deleteState.message}</Alert>}
     </div>

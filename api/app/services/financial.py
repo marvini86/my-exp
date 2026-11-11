@@ -136,6 +136,7 @@ class FinancialService:
                 entry_response(r)
                 for r in self.entries.open_bills(account_id, today - OPEN_BILLS_WINDOW, today + OPEN_BILLS_WINDOW)
             ],
+            pending_review=self.reports.pending_review_count(account_id),
         )
 
     # -- prices -------------------------------------------------------------------
@@ -198,5 +199,6 @@ def entry_response(row: EntryListRow) -> EntryResponse:
         due_date=e.due_date,
         paid_at=e.paid_at,
         payment_status=e.payment_status,
+        needs_review=e.needs_review,
     )
 

@@ -20,6 +20,7 @@ from schemas.conversation import (
     CreateConversationRequest,
     MessageResponse,
 )
+from services.assistant.items import ItemResolver
 from services.assistant.service import AssistantService
 from services.assistant.tools import AssistantTools
 from services.embeddings import EmbeddingRouter
@@ -45,6 +46,7 @@ def get_assistant_service(
     tools = AssistantTools(
         FinancialQueryRepository(session),
         SearchService(DocumentRepository(session), embeddings, store),
+        ItemResolver(llm),
     )
     return AssistantService(session, ConversationRepository(session), tools, llm)
 

@@ -26,6 +26,7 @@ const KNOWN_DETAILS: Record<string, string> = {
   "AI daily limit reached": "O limite diário da IA gratuita foi atingido.",
   "Document is being processed, try again in a moment": "O documento está sendo processado agora. Tente de novo em instantes.",
   "Document is already queued for processing": "Este documento já está na fila de processamento.",
+  "Document is not pending review": "Este documento não está aguardando revisão.",
 };
 
 const BY_STATUS: Record<number, string> = {

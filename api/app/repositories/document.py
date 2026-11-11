@@ -38,6 +38,16 @@ class DocumentRepository:
         )
         return self.session.scalars(stmt).one_or_none()
 
+    def get_by_access_key(self, account_id: UUID, access_key: str, exclude_id: UUID) -> Document | None:
+        """Another document of the account with the same invoice (access key)."""
+        return self.session.scalars(
+            select(Document).where(
+                Document.account_id == account_id,
+                Document.access_key == access_key,
+                Document.id != exclude_id,
+            )
+        ).first()
+
     def list_by_account(
         self, account_id: UUID, *, limit: int, offset: int, status: ProcessingStatus | None = None
     ) -> tuple[list[Document], int]:

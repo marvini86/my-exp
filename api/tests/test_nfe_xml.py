@@ -43,7 +43,7 @@ class TestNfce:
     def test_metadata(self):
         meta = extractor.extract(NFCE).metadata
 
-        assert meta["access_key"] == "35240112345678000190650010000123451000123456"
+        assert meta["access_key"] == "35240112345678000190650010000123451000123452"
         assert meta["authorization_status"] == "100"
         assert meta["payment_methods"] == ["pix"]
         assert meta["discount"] == "2.00"

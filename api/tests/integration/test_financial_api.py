@@ -225,3 +225,42 @@ def test_decimal_amount_has_no_float_error(client, family):
     total = sum(Decimal(e["amount"]) for e in entries(client, family, limit=100)["items"])
 
     assert total == Decimal("496.53")
+
+
+class TestReview:
+    """Doubtful reading: shown in lists, but left out of the totals until someone confirms it."""
+
+    def test_pending_review_is_out_of_totals_until_confirmed(self, client, family, session):
+        from models import Document
+
+        entry = session.query(FinancialEntry).filter_by(establishment="Mercado Exemplo").one()
+        entry.needs_review = True
+        document = session.get(Document, entry.document_id)
+        document.extracted_data = {
+            "status": "extracted",
+            "review": {"pending": True, "reasons": [{"code": "items_total_mismatch", "items_total": "60.00", "total": "63.43"}]},
+        }
+        session.flush()
+        summary_url = f"{family['base']}/reports/summary"
+        period = {"start": "2026-09-01", "end": "2026-10-31"}
+
+        pending = client.get(summary_url, params=period, headers=family["owner"]).json()
+        detail = client.get(f"{family['base']}/documents/{document.id}", headers=family["member"]).json()
+        listed = entries(client, family, start="2026-10-01", end="2026-10-31")
+
+        assert (pending["total"], pending["count"], pending["pending_review"]) == ("155.00", 2, 1)  # without the 63.43
+        assert detail["needs_review"] is True
+        assert detail["review_reasons"] == [
+            {"code": "items_total_mismatch", "items_total": "60.00", "total": "63.43", "read": None, "printed": None, "document_id": None}
+        ]
+        assert any(e["needs_review"] for e in listed["items"])  # still in the list, with a badge
+
+        confirmed = client.post(f"{family['base']}/documents/{document.id}/review", headers=family["member"])
+
+        assert confirmed.status_code == 200, confirmed.text
+        assert confirmed.json()["needs_review"] is False
+        after = client.get(summary_url, params=period, headers=family["owner"]).json()
+        assert (after["total"], after["pending_review"]) == ("218.43", 0)
+
+        again = client.post(f"{family['base']}/documents/{document.id}/review", headers=family["member"])
+        assert again.status_code == 409

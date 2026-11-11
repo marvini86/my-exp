@@ -22,7 +22,13 @@ from models.conversation import Conversation, Message, MessageRole
 from repositories.conversation import ConversationRepository
 from schemas.conversation import AskResponse, ConversationResponse, CreateConversationRequest, MessageResponse
 from services.assistant.answer import OUT_OF_SCOPE_ANSWER, build_answer_messages, resolve_citations
-from services.assistant.planner import Intent, QueryPlan, build_planner_messages, normalize_plan
+from services.assistant.planner import (
+    Intent,
+    QueryPlan,
+    build_planner_messages,
+    clarifies_previous,
+    normalize_plan,
+)
 from services.assistant.tools import AssistantTools
 from services.llm_router import LLMOutputError, LLMRequestError, LLMRouter, LLMUnavailableError
 
@@ -76,11 +82,15 @@ class AssistantService:
 
     def ask(self, context: AccountContext, conversation_id: UUID, question: str) -> AskResponse:
         conversation = self._owned(context, conversation_id)
-        history = [
-            (m.role.value, m.content)
+        recent = [
+            m
             for m in self.conversations.recent_messages(context.account_id, conversation_id, limit=HISTORY_MESSAGES)
             if m.role in (MessageRole.USER, MessageRole.ASSISTANT)
         ]
+        history = [(m.role.value, m.content) for m in recent]
+        previous_plan = next(
+            ((m.metadata_ or {}).get("plan") for m in reversed(recent) if m.role is MessageRole.ASSISTANT), None
+        )
 
         user_message = self.conversations.add_message(
             Message(account_id=context.account_id, conversation_id=conversation_id, role=MessageRole.USER, content=question)
@@ -91,7 +101,9 @@ class AssistantService:
         self.session.commit()
 
         today = self.today()
-        plan, planner_model = self._plan(question, history, today)
+        plan, planner_model = self._plan(question, history, today, previous_plan)
+        if plan.intent is Intent.OUT_OF_SCOPE and (repeated := clarifies_previous(previous_plan, question)):
+            plan = normalize_plan(repeated, question, today)
 
         if plan.intent is Intent.OUT_OF_SCOPE:
             text, citations, answer_model, tool = OUT_OF_SCOPE_ANSWER, [], None, "none"
@@ -140,9 +152,12 @@ class AssistantService:
             raise NotFoundError("Conversation not found")
         return conversation
 
-    def _plan(self, question: str, history: list[tuple[str, str]], today: date) -> tuple[QueryPlan, str | None]:
+    def _plan(
+        self, question: str, history: list[tuple[str, str]], today: date, previous_plan: dict | None = None
+    ) -> tuple[QueryPlan, str | None]:
         try:
-            plan, model = self.llm.structured(build_planner_messages(question, history, today), QueryPlan)
+            messages = build_planner_messages(question, history, today, previous_plan)
+            plan, model = self.llm.structured(messages, QueryPlan)
         except LLMOutputError:
             # No model managed to plan: searching the documents is a safe fallback.
             logger.warning("Planner produced no valid plan; falling back to document search")

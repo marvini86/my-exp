@@ -20,6 +20,7 @@ from core.exceptions import (
 from models.account_member import AccountRole
 from models.document import Document, IngestionJob, ProcessingStatus
 from repositories.document import DocumentRepository, IngestionJobRepository
+from repositories.financial import FinancialRepository
 from repositories.financial_entry import EntryFilters, FinancialEntryRepository
 from repositories.vector_store import VectorStore
 from schemas.document import (
@@ -95,8 +96,24 @@ class DocumentService:
                     DocumentItemResponse.model_validate(item)
                     for item in self.document_repository.items(context.account_id, document.id)
                 ],
+                "review_reasons": document.review_reasons,
             }
         )
+
+    def confirm_review(
+        self, context: AccountContext, document_id: UUID, entry_repository: FinancialEntryRepository
+    ) -> DocumentDetailResponse:
+        """Someone checked the doubtful reading: the entry goes back into the totals. Any member can."""
+        document = self._get_or_404(context, document_id)
+        if not document.needs_review:
+            raise ConflictError("Document is not pending review")
+        FinancialRepository(self.session).confirm_review(context.account_id, document.id)
+        review = dict(document.extracted_data.get("review") or {})
+        review.update(pending=False, confirmed_by=str(context.user.id), confirmed_at=datetime.now(UTC).isoformat())
+        document.extracted_data = {**document.extracted_data, "review": review}
+        self.session.commit()
+        logger.info("Document review confirmed | document=%s", document.id)
+        return self.get_document(context, document.id, entry_repository)
 
     def get_download_url(self, context: AccountContext, document_id: UUID) -> DocumentDownloadResponse:
         document = self._get_or_404(context, document_id)

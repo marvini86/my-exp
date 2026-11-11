@@ -10,11 +10,16 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
 
-from schemas.extraction import ExtractedDocument
+from schemas.extraction import DocumentType, ExtractedDocument
 from services.document_processor import PermanentProcessingError
 
 # Tolerance for rounding between the items and the total.
 _TOTAL_TOLERANCE = Decimal("0.05")
+
+# Documents whose items ARE the purchase (the sum must match the total).
+_ITEMIZED_PURCHASES = frozenset(
+    {DocumentType.NFCE, DocumentType.NFE, DocumentType.GROCERY_RECEIPT, DocumentType.PHARMACY_RECEIPT}
+)
 
 
 @dataclass
@@ -52,6 +57,33 @@ def items_count_matches(extracted: ExtractedDocument) -> bool:
         whole = quantity is not None and quantity == quantity.to_integral_value() and quantity > 0
         units += int(quantity) if whole else 1
     return int(printed) in (len(extracted.items), units)
+
+
+def review_reasons(extracted: ExtractedDocument) -> list[dict[str, str]]:
+    """Reading still doubtful after the re-reads: the entry stays pending review
+    (out of the totals). Stable codes + values; the interface builds the message.
+
+    Only for purchase receipts: on a bill (water, electricity...) the items are a partial breakdown
+    (consumption tiers, without sewage/fees) and the printed total is what counts; removing the bill
+    from the totals and from the bills to pay because of that would do more harm than good."""
+    reasons: list[dict[str, str]] = []
+    if extracted.document_type not in _ITEMIZED_PURCHASES:
+        return reasons
+    difference = items_total_difference(extracted)
+    if difference is not None and difference > _TOTAL_TOLERANCE:
+        items_total = sum((i.total_price for i in extracted.items if i.total_price is not None), Decimal("0"))
+        reasons.append(
+            {"code": "items_total_mismatch", "items_total": str(items_total), "total": str(extracted.total_amount)}
+        )
+    if not items_count_matches(extracted):
+        reasons.append(
+            {
+                "code": "item_count_mismatch",
+                "read": str(len(extracted.items)),
+                "printed": str(extracted.metadata.get("items_count_printed")),
+            }
+        )
+    return reasons
 
 
 def consistency_issues(extracted: ExtractedDocument) -> list[str]:

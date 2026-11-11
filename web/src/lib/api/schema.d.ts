@@ -349,6 +349,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/accounts/{account_id}/documents/{document_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Document Review
+         * @description Confirms a reading pending review: the entry goes back into the totals.
+         */
+        post: operations["confirm_document_review_accounts__account_id__documents__document_id__review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/accounts/{account_id}/documents/{document_id}/download": {
         parameters: {
             query?: never;
@@ -735,10 +755,22 @@ export interface components {
             updated_at: string;
             /** Next Attempt At */
             next_attempt_at?: string | null;
+            /**
+             * Needs Review
+             * @default false
+             */
+            needs_review: boolean;
+            /** Duplicate Of */
+            duplicate_of?: string | null;
             /** Entries */
             entries: components["schemas"]["EntryResponse"][];
             /** Items */
             items: components["schemas"]["DocumentItemResponse"][];
+            /**
+             * Review Reasons
+             * @default []
+             */
+            review_reasons: components["schemas"]["ReviewReason"][];
         };
         /** DocumentDownloadResponse */
         DocumentDownloadResponse: {
@@ -813,6 +845,13 @@ export interface components {
             updated_at: string;
             /** Next Attempt At */
             next_attempt_at?: string | null;
+            /**
+             * Needs Review
+             * @default false
+             */
+            needs_review: boolean;
+            /** Duplicate Of */
+            duplicate_of?: string | null;
         };
         /** EntryCategory */
         EntryCategory: {
@@ -870,6 +909,11 @@ export interface components {
             /** Paid At */
             paid_at: string | null;
             payment_status: components["schemas"]["PaymentStatus"];
+            /**
+             * Needs Review
+             * @default false
+             */
+            needs_review: boolean;
         };
         /**
          * EntryType
@@ -1090,6 +1134,27 @@ export interface components {
             /** Refresh Token */
             refresh_token: string;
         };
+        /**
+         * ReviewReason
+         * @description Why the reading is pending. The interface builds the message from the code.
+         */
+        ReviewReason: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "items_total_mismatch" | "item_count_mismatch" | "possible_duplicate";
+            /** Items Total */
+            items_total?: string | null;
+            /** Total */
+            total?: string | null;
+            /** Read */
+            read?: number | null;
+            /** Printed */
+            printed?: number | null;
+            /** Document Id */
+            document_id?: string | null;
+        };
         /** SearchResponse */
         SearchResponse: {
             /** Query */
@@ -1146,6 +1211,11 @@ export interface components {
             top_products: components["schemas"]["GroupTotalResponse"][];
             /** Open Bills */
             open_bills: components["schemas"]["EntryResponse"][];
+            /**
+             * Pending Review
+             * @default 0
+             */
+            pending_review: number;
         };
         /** TokenResponse */
         TokenResponse: {
@@ -2572,6 +2642,65 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentResponse"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden (insufficient role) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found (or an account you are not a member of) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_document_review_accounts__account_id__documents__document_id__review_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentDetailResponse"];
                 };
             };
             /** @description Not authenticated */

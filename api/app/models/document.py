@@ -78,6 +78,23 @@ class Document(UUIDPrimaryKey, Timestamped, Base):
     )
     processing_error: Mapped[str | None] = mapped_column(Text)
     indexed_at: Mapped[datetime | None] = mapped_column()
+    # Invoice access key (unique per account): deduplicates the same receipt sent as different files.
+    access_key: Mapped[str | None] = mapped_column(String(44))
+
+    # State written by the worker in extracted_data (see services/extraction/processor.py).
+    @property
+    def needs_review(self) -> bool:
+        return bool(((self.extracted_data or {}).get("review") or {}).get("pending"))
+
+    @property
+    def review_reasons(self) -> list[dict[str, Any]]:
+        review = (self.extracted_data or {}).get("review") or {}
+        return list(review.get("reasons") or []) if review.get("pending") else []
+
+    @property
+    def duplicate_of(self) -> uuid.UUID | None:
+        data = self.extracted_data or {}
+        return uuid.UUID(data["duplicate_of"]) if data.get("status") == "duplicate" and data.get("duplicate_of") else None
 
 
 class IngestionJob(UUIDPrimaryKey, Timestamped, Base):

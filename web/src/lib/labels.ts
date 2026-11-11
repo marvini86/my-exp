@@ -1,4 +1,5 @@
 import type { components } from "@/lib/api/schema";
+import { formatBRL } from "@/lib/format";
 
 type Schemas = components["schemas"];
 export type ProcessingStatus = Schemas["ProcessingStatus"];
@@ -49,11 +50,43 @@ export const ENTRY_TYPE_LABELS: Record<EntryType, string> = {
 };
 
 /** Document badge, accounting for extraction postponed for lack of AI quota. */
-export function documentStatus(doc: { processing_status: ProcessingStatus; next_attempt_at?: string | null }) {
+export function documentStatus(doc: {
+  processing_status: ProcessingStatus;
+  next_attempt_at?: string | null;
+  needs_review?: boolean;
+  duplicate_of?: string | null;
+}) {
   if (doc.processing_status === "pending" && doc.next_attempt_at) {
     return { label: "Aguardando IA", badge: "bg-amber-100 text-amber-800" };
   }
+  if (doc.processing_status === "completed" && doc.duplicate_of) {
+    return { label: "Duplicada", badge: "bg-slate-200 text-slate-700" };
+  }
+  if (doc.processing_status === "completed" && doc.needs_review) {
+    return { label: "Revisar", badge: "bg-amber-100 text-amber-800" };
+  }
   return PROCESSING_STATUS[doc.processing_status];
+}
+
+export type ReviewReason = {
+  code: "items_total_mismatch" | "item_count_mismatch" | "possible_duplicate";
+  items_total?: string | null;
+  total?: string | null;
+  read?: number | null;
+  printed?: number | null;
+  document_id?: string | null;
+};
+
+/** Why the reading is pending (the API sends codes; the text lives here). */
+export function reviewReasonText(reason: ReviewReason): string {
+  switch (reason.code) {
+    case "items_total_mismatch":
+      return `A soma dos itens (${formatBRL(reason.items_total)}) não bate com o total da nota (${formatBRL(reason.total)}).`;
+    case "item_count_mismatch":
+      return `Foram lidos ${reason.read} itens, mas a nota informa ${reason.printed}.`;
+    case "possible_duplicate":
+      return "Já existe uma nota da mesma loja, com a mesma data e o mesmo valor.";
+  }
 }
 
 /** "21:00" in Brasília time. */

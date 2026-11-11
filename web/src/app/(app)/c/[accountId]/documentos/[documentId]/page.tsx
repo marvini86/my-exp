@@ -17,6 +17,7 @@ import {
   formatFileSize,
   formatTime,
   isInProgress,
+  reviewReasonText,
 } from "@/lib/labels";
 import { MANAGERS, hasRole } from "@/lib/roles";
 import { getAccount, getCurrentUser } from "@/lib/session";
@@ -85,7 +86,47 @@ export default async function DocumentPage({ params }: { params: Promise<{ accou
         )}
       </div>
 
-      <DocumentActions accountId={account.id} documentId={doc.id} canReprocess={canReprocess} canDelete={canDelete} />
+      {doc.duplicate_of && (
+        <div className="mb-6">
+          <Alert tone="info">
+            Esta nota já tinha sido enviada (mesma chave de acesso), então não gerou uma nova despesa.{" "}
+            <Link href={`${basePath}/${doc.duplicate_of}`} className="font-medium underline">
+              Ver a nota original
+            </Link>
+          </Alert>
+        </div>
+      )}
+
+      {doc.needs_review && (
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <p className="font-semibold">Confira os valores desta nota</p>
+          <p className="mt-1">A leitura ficou com dúvidas, por isso ela ainda não entrou nos totais nem nas respostas do assistente:</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {doc.review_reasons.map((reason, i) => (
+              <li key={i}>
+                {reviewReasonText(reason)}
+                {reason.code === "possible_duplicate" && reason.document_id && (
+                  <>
+                    {" "}
+                    <Link href={`${basePath}/${reason.document_id}`} className="font-medium underline">
+                      Ver a outra nota
+                    </Link>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2">Se os valores abaixo estiverem certos, confirme. Se não, processe de novo ou apague.</p>
+        </div>
+      )}
+
+      <DocumentActions
+        accountId={account.id}
+        documentId={doc.id}
+        canReprocess={canReprocess}
+        canDelete={canDelete}
+        canConfirm={doc.needs_review && doc.processing_status === "completed"}
+      />
 
       {waitingQuota && doc.next_attempt_at && (
         <div className="mb-6">

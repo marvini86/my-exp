@@ -104,6 +104,8 @@ class FinancialEntry(UUIDPrimaryKey, Timestamped, Base):
         default=PaymentStatus.UNKNOWN,
         server_default=PaymentStatus.UNKNOWN.value,
     )
+    # Doubtful reading: left out of the totals until someone confirms it (POST .../documents/{id}/review).
+    needs_review: Mapped[bool] = mapped_column(nullable=False, default=False, server_default=text("false"))
     metadata_: Mapped[dict[str, Any]] = _metadata_column()
 
 

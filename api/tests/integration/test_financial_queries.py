@@ -223,6 +223,60 @@ class TestBillsAndDocuments:
 
         assert [(r.document_type, r.amount) for r in rows] == [("pharmacy_receipt", Decimal("35.00"))]
 
+    def test_bills_of_several_types(self, queries, accounts, session):
+        add_purchase(session, accounts["a"], doc_type="water_bill", establishment="Águas", amount="131.42",
+                     day=date(2026, 11, 9), due=date(2026, 11, 20))
+
+        rows = queries.bills_by_month(accounts["a"], ["energy_bill", "water_bill"])
+
+        assert [(r.document_type, r.amount) for r in rows] == [
+            ("energy_bill", Decimal("217.80")), ("energy_bill", Decimal("198.10")), ("water_bill", Decimal("131.42")),
+        ]
+
+    def test_list_documents_by_establishment_with_items(self, queries, accounts):
+        rows = queries.list_documents(accounts["a"], establishment="atacadao")
+
+        assert [r.establishment for r in rows] == ["Atacadão Centro"]
+        items = queries.items_of_documents(accounts["a"], [rows[0].document_id])
+        assert sorted(i.description for i in items[rows[0].document_id]) == [
+            "ARROZ 100% INTEGRAL", "LEITE INTEGRAL 1L", "REFRIG COCA COLA 220ML",
+        ]
+        assert queries.items_of_documents(accounts["a"], []) == {}
+
+
+class TestItemChoice:
+    """Items chosen by exact name (account vocabulary), as the item selector returns them."""
+
+    def test_vocabulary_is_per_account_and_most_recent_first(self, queries, accounts):
+        names, truncated = queries.item_vocabulary(accounts["a"])
+
+        assert names[:3] == ["ARROZ 100% INTEGRAL", "LEITE INTEGRAL 1L", "REFRIG COCA COLA 220ML"]
+        assert "PAO FRANCES KG" in names and not truncated
+        assert queries.item_vocabulary(accounts["a"], start=date(2026, 10, 15))[0] == names[:3]
+        assert queries.item_vocabulary(accounts["a"], limit=2) == (names[:2], True)
+
+    def test_chosen_descriptions_replace_the_text_match(self, queries, accounts):
+        # "lanche" is not in any name: only the choice by name finds them.
+        rows = queries.items_matching(accounts["a"], "lanche", descriptions=["PAO FRANCES KG", "REFRIG COCA COLA 220ML"])
+        totals = queries.product_totals(accounts["a"], "lanche", descriptions=["PAO FRANCES KG", "REFRIG COCA COLA 220ML"])
+
+        assert sorted(r.description for r in rows) == ["PAO FRANCES KG", "REFRIG COCA COLA 220ML"]
+        assert totals.total_spent == Decimal("8.19") + Decimal("5.78")
+
+    def test_items_the_choice_did_not_see_still_match_by_text(self, queries, accounts):
+        # Truncated vocabulary: "LEITE INTEGRAL 1L" was not evaluated, so text search still applies to it.
+        rows = queries.items_matching(accounts["a"], "leite", descriptions=[], seen=["ARROZ 100% INTEGRAL"])
+        assert {r.description for r in rows} == {"LEITE INTEGRAL 1L"}
+        # Evaluated and rejected (e.g. cream for "leite"): it does not come back through text search.
+        assert queries.items_matching(accounts["a"], "leite", descriptions=[], seen=["LEITE INTEGRAL 1L"]) == []
+
+    def test_price_series_is_chronological(self, queries, accounts):
+        rows = queries.price_series(accounts["a"])
+
+        leite = [(r.occurred_at, r.unit_price) for r in rows if r.description == "LEITE INTEGRAL 1L"]
+        assert leite == [(date(2026, 10, 10), Decimal("4.8900")), (date(2026, 10, 20), Decimal("4.2900"))]
+        assert all(r.establishment != "Mercado B" for r in rows)
+
 
 
 def test_known_establishment_name_for_tax_id(session, accounts):

@@ -17,7 +17,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.exc import DBAPIError, ProgrammingError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -37,6 +37,7 @@ from models import (
     ProcessingStatus,
     User,
 )
+from schemas.extraction import DocumentType, ExtractedDocument, ExtractedItem
 from services.document_processor import DeferProcessingError, IntegrityCheckProcessor, PermanentProcessingError
 from services.extraction.nfe_xml import NFeXmlExtractor
 from services.extraction.processor import ExtractionProcessor
@@ -160,6 +161,13 @@ def make_service(worker_sessions, storage):
         )
 
     return _make
+
+
+def drain(service: IngestionService) -> None:
+    """Processes the queue until empty (extraction enqueues indexing right after)."""
+    for _ in range(20):
+        if not service.process_next():
+            return
 
 
 def reload(admin_engine, document, job) -> tuple[Document, IngestionJob]:
@@ -386,6 +394,45 @@ class TestExtraction:
         entries, items = self.financial_rows(admin_engine, document)
         assert (len(entries), len(items)) == (1, 3)
 
+    def test_same_receipt_in_another_file_is_a_duplicate(self, admin_engine, make_job, extraction_service):
+        first, _ = make_job(content=self.NFCE, mime_type="application/xml")
+        drain(extraction_service)
+        # Same NFC-e (same access key) with different bytes: SHA-256 does not catch it.
+        second, job = make_job(content=self.NFCE + b" ", mime_type="application/xml")
+
+        drain(extraction_service)
+
+        first, _ = reload(admin_engine, first, job)
+        second, job = reload(admin_engine, second, job)
+        assert job.status is ProcessingStatus.COMPLETED
+        assert first.access_key is not None and second.access_key is None
+        assert second.extracted_data["status"] == "duplicate"
+        assert second.duplicate_of == first.id
+        assert self.financial_rows(admin_engine, second) == ([], [])
+        assert len(self.financial_rows(admin_engine, first)[0]) == 1
+        with Session(admin_engine) as s:
+            index_jobs = s.scalar(
+                select(func.count()).select_from(IngestionJob).where(
+                    IngestionJob.document_id == second.id, IngestionJob.job_type == "index"
+                )
+            )
+        assert index_jobs == 0
+
+    def test_reprocessing_keeps_the_original_access_key(self, admin_engine, make_job, extraction_service):
+        document, job = make_job(content=self.NFCE, mime_type="application/xml")
+        drain(extraction_service)
+        with admin_engine.begin() as conn:
+            conn.execute(
+                text("UPDATE ingestion_jobs SET status = 'pending', available_at = NOW() WHERE id = :id"),
+                {"id": job.id},
+            )
+
+        drain(extraction_service)
+
+        document, _ = reload(admin_engine, document, job)
+        assert document.extracted_data["status"] == "extracted"
+        assert document.access_key is not None
+
     def test_pdf_without_extractor_is_completed_and_skipped(self, admin_engine, make_job, extraction_service):
         document, job = make_job()
 
@@ -405,6 +452,64 @@ class TestExtraction:
         assert (job.status, job.attempts) == (ProcessingStatus.FAILED, 1)
         assert "not an NF-e" in document.processing_error
         assert self.financial_rows(admin_engine, document) == ([], [])
+
+
+class FixedExtractor:
+    def __init__(self, extracted):
+        self.extracted = extracted
+
+    def supports(self, mime_type):
+        return True
+
+    def extract(self, content, mime_type):
+        return self.extracted
+
+
+def receipt(total: str, items: list[str], **metadata) -> ExtractedDocument:
+    return ExtractedDocument(
+        document_type=DocumentType.NFCE,
+        establishment="Mercado Teste",
+        establishment_tax_id="11222333000181",
+        issued_at=datetime(2026, 11, 8).date(),
+        total_amount=Decimal(total),
+        items=[ExtractedItem(description=f"ITEM {i}", quantity=Decimal("1"), total_price=Decimal(v)) for i, v in enumerate(items)],
+        metadata=metadata,
+    )
+
+
+class TestReview:
+    """Reading still doubtful: stored, but out of the totals until someone confirms it."""
+
+    @staticmethod
+    def run(make_job, make_service, extracted, content=CONTENT):
+        document, job = make_job(content=content)
+        drain(make_service(processor=ExtractionProcessor(extractors=[FixedExtractor(extracted)])))
+        return document, job
+
+    def test_items_not_adding_up_are_pending_review(self, admin_engine, make_job, make_service):
+        document, job = self.run(make_job, make_service, receipt("112.15", ["50.00", "40.00"]))
+
+        document, _ = reload(admin_engine, document, job)
+        assert document.needs_review is True
+        assert [r["code"] for r in document.review_reasons] == ["items_total_mismatch"]
+        assert document.review_reasons[0]["items_total"] == "90.00"
+        with Session(admin_engine) as s:
+            entry = s.scalars(select(FinancialEntry).where(FinancialEntry.document_id == document.id)).one()
+        assert entry.needs_review is True
+
+    def test_consistent_reading_is_not_pending(self, admin_engine, make_job, make_service):
+        document, job = self.run(make_job, make_service, receipt("90.00", ["50.00", "40.00"]))
+
+        document, _ = reload(admin_engine, document, job)
+        assert document.needs_review is False
+
+    def test_same_store_date_and_total_without_key_is_a_possible_duplicate(self, admin_engine, make_job, make_service):
+        first, _ = self.run(make_job, make_service, receipt("90.00", ["50.00", "40.00"]))
+        second, job = self.run(make_job, make_service, receipt("90.00", ["50.00", "40.00"]), content=CONTENT + b"2")
+
+        second, _ = reload(admin_engine, second, job)
+        assert second.needs_review is True
+        assert second.review_reasons == [{"code": "possible_duplicate", "document_id": str(first.id)}]
 
 
 class TestIndexing:

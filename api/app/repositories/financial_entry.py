@@ -105,7 +105,11 @@ class FinancialEntryRepository:
             .outerjoin(
                 Document, (Document.id == FinancialEntry.document_id) & (Document.account_id == FinancialEntry.account_id)
             )
-            .where(*self._conditions(account_id, filters), FinancialEntry.entry_type == EntryType.EXPENSE)
+            .where(
+                *self._conditions(account_id, filters),
+                FinancialEntry.entry_type == EntryType.EXPENSE,
+                FinancialEntry.needs_review.is_(False),
+            )
         )
         return Decimal(total)
 
@@ -127,6 +131,7 @@ class FinancialEntryRepository:
                 FinancialEntry.account_id == account_id,
                 FinancialEntry.due_date.between(due_from, due_until),
                 FinancialEntry.payment_status.not_in([PaymentStatus.PAID, PaymentStatus.CANCELLED]),
+                FinancialEntry.needs_review.is_(False),
             )
             .order_by(FinancialEntry.due_date, FinancialEntry.id)
             .limit(limit)

@@ -125,3 +125,30 @@ def test_printed_count_matching_neither_lines_nor_units_is_flagged():
     issues = consistency_issues(sendas_like(discount="3.78", items_count_printed="20"))
 
     assert issues == ["read 13 items but document lists 20"]
+
+
+def test_review_reasons_are_structured_codes():
+    from services.extraction.validation import review_reasons
+
+    reasons = review_reasons(sendas_like(items_count_printed="20"))
+
+    assert reasons == [
+        {"code": "items_total_mismatch", "items_total": "115.93", "total": "112.15"},
+        {"code": "item_count_mismatch", "read": "13", "printed": "20"},
+    ]
+    assert review_reasons(sendas_like(discount="3.78")) == []
+
+
+def test_utility_bill_with_partial_items_is_not_held_for_review():
+    """Real water bill: only the water consumption tiers (72.13) were read as items; the total
+    (131.42, with sewage) is what counts. The bill must not disappear from the totals and the bills to pay."""
+    from services.extraction.validation import review_reasons
+
+    bill = ExtractedDocument(
+        document_type=DocumentType.WATER_BILL,
+        issued_at=date(2026, 11, 9),
+        total_amount=Decimal("131.42"),
+        items=[item("46.03"), item("26.10")],
+    )
+
+    assert review_reasons(bill) == []

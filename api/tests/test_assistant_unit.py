@@ -119,7 +119,7 @@ class TestFollowUpsAndFallbacks:
 
         assert normalize_plan(plan, "outubro", TODAY).end_date == date(2026, 10, 31)
 
-    @pytest.mark.parametrize("written", ["[ D1 ]", "【D1】", "［D1］", "[D1]", "[fonte D1]", "[Fonte: D1]"])
+    @pytest.mark.parametrize("written", ["[ D1 ]", "【D1】", "［D1］", "[D1]", "[fonte D1]", "[Fonte: D1]", "[​D1]"])
     def test_citation_spellings_are_kept_and_normalized(self, written):
         sources = [Source("D1", uuid4(), "cupom.jpg")]
 
@@ -139,6 +139,9 @@ class TestFollowUpsAndFallbacks:
 
             def product_totals(self, *a, **k):
                 return SimpleNamespace(purchases=0, total_spent=0, quantity_by_unit={})
+
+            def pending_review_count(self, *a, **k):
+                return 0
 
         class Search:
             def search(self, context, query, limit):
@@ -252,6 +255,256 @@ def test_receipt_details_are_not_out_of_scope():
 
 def test_greeting_stays_out_of_scope():
     assert normalize_plan(QueryPlan(intent=Intent.OUT_OF_SCOPE), "bom dia!", TODAY).intent is Intent.OUT_OF_SCOPE
+
+
+# --- fixes from production chats (11/2026) ---------------------------------------------------
+
+
+ALL_BILLS = [DocumentType.ENERGY_BILL, DocumentType.WATER_BILL, DocumentType.TELECOM_BILL]
+
+
+@pytest.mark.parametrize(
+    ("question", "expected"),
+    [
+        ("Quais Contas da casa já tenho q pagar esse mes?", ALL_BILLS),
+        ("tenho contas para pagar?", ALL_BILLS),
+        ("Contas de casa sao de agua e Luz, quais tenho q pagar?", [DocumentType.ENERGY_BILL, DocumentType.WATER_BILL]),
+    ],
+)
+def test_bills_to_pay_cover_every_bill_type_asked(question, expected):
+    # The model picked only electricity and the current month; a bill to pay may have been issued earlier.
+    plan = QueryPlan(intent=Intent.BILLS_COMPARISON, document_types=[DocumentType.ENERGY_BILL],
+                     start_date=date(2026, 11, 1), end_date=date(2026, 11, 30))
+
+    normalized = normalize_plan(plan, question, TODAY)
+
+    assert (normalized.intent, normalized.document_types) == (Intent.BILLS_COMPARISON, expected)
+    assert (normalized.start_date, normalized.end_date) == (None, None)
+
+
+def test_follow_up_naming_bill_types_keeps_them_all():
+    plan = QueryPlan(intent=Intent.BILLS_COMPARISON, document_types=[DocumentType.WATER_BILL])
+
+    normalized = normalize_plan(plan, "Contas de casa sao de agua e Luz", TODAY)
+
+    assert normalized.document_types == [DocumentType.ENERGY_BILL, DocumentType.WATER_BILL]
+
+
+def test_water_as_a_product_is_not_a_bill():
+    plan = normalize_plan(QueryPlan(intent=Intent.PRICE_HISTORY, product="água mineral"), "quanto paguei na água mineral?", TODAY)
+
+    assert plan.intent is Intent.PRICE_HISTORY and plan.document_types == []
+
+
+def test_comparison_period_needs_both_periods():
+    october = {"compare_start_date": date(2026, 10, 1), "compare_end_date": date(2026, 10, 31)}
+    november = {"start_date": date(2026, 11, 1), "end_date": TODAY}
+
+    kept = normalize_plan(QueryPlan(intent=Intent.PRICE_HISTORY, product="legumes", **november, **october), "q", TODAY)
+    dropped = normalize_plan(QueryPlan(intent=Intent.PRICE_HISTORY, product="legumes", **october), "q", TODAY)
+
+    assert (kept.compare_start_date, kept.compare_end_date) == (date(2026, 10, 1), date(2026, 10, 31))
+    assert (dropped.compare_start_date, dropped.compare_end_date) == (None, None)
+
+
+def test_planner_sees_the_previous_plan():
+    # "legumes são tomate, cebola..." lost the "this month" of the previous question.
+    previous = {"intent": "price_history", "product": "legumes", "start_date": "2026-11-01", "end_date": "2026-11-30",
+                "establishment": None, "document_types": []}
+
+    content = build_planner_messages("Legumes são tomates, cebolas e etc", [], TODAY, previous)[1].content
+
+    assert '"product": "legumes"' in content and '"start_date": "2026-11-01"' in content
+    assert "establishment" not in content  # campos vazios ficam de fora
+    assert "PLANO ANTERIOR:\n(nenhum)" in build_planner_messages("oi", [], TODAY)[1].content
+
+
+@pytest.mark.parametrize(
+    ("written", "expected"),
+    [
+        ("Total R$ 553,87 [spending_summary].", "Total R$ 553,87."),
+        ("Nada encontrado. [fonte: dados da ferramenta bills_comparison]", "Nada encontrado."),
+        ("Nada encontrado (dados da ferramenta bills_comparison).", "Nada encontrado."),
+        ("Você gastou R$ 500,54【】.", "Você gastou R$ 500,54."),
+    ],
+)
+def test_internal_names_never_reach_the_user(written, expected):
+    text, _ = resolve_citations(written, [], uuid4())
+
+    assert text == expected
+
+
+def test_answer_prompt_does_not_carry_the_tool_name():
+    output = ToolOutput("spending_summary", {"has_results": True}, [])
+
+    assert "spending_summary" not in build_answer_messages("q", [], output)[1].content
+
+
+class FakeLLM:
+    def __init__(self, matches=None, error=None):
+        self.matches, self.error, self.messages = matches, error, None
+
+    def structured(self, messages, schema):
+        self.messages = messages
+        if self.error:
+            raise self.error
+        return schema(matches=self.matches), "fake"
+
+
+class TestItemResolver:
+    NAMES = ["CSCOX LAR C/DORSO", "LTE INT ITALAC 1L CT", "CR LEITE TP LEITBOM 200G", "TOMATE SALADA"]
+
+    def test_returns_the_chosen_names(self):
+        from services.assistant.items import ItemResolver
+
+        llm = FakeLLM(matches=[2, 2, 9, 0])
+
+        assert ItemResolver(llm).select("leite", "qt gastei de leite?", self.NAMES) == ["LTE INT ITALAC 1L CT"]
+        assert "1. CSCOX LAR C/DORSO" in llm.messages[1].content  # numbers that do not exist are ignored
+
+    def test_unavailable_ai_means_text_search(self):
+        from services.assistant.items import ItemResolver
+        from services.llm_router import LLMUnavailableError
+
+        llm = FakeLLM(error=LLMUnavailableError("sem modelos", 60))
+
+        assert ItemResolver(llm).select("frango", "e o frango?", self.NAMES) is None
+        assert ItemResolver(llm).select("frango", "e o frango?", []) == []
+
+
+class FakeQueries:
+    """Only what the product tools use; records the arguments received."""
+
+    def __init__(self, names=(), rows=()):
+        self.names, self.rows, self.calls = list(names), list(rows), []
+
+    def item_vocabulary(self, account_id, *, start=None, end=None, limit=400):
+        self.calls.append(("vocabulary", start, end))
+        return self.names, False
+
+    def items_matching(self, account_id, product, **kwargs):
+        self.calls.append(("items", kwargs.get("descriptions"), kwargs.get("start")))
+        return [r for r in self.rows if kwargs.get("descriptions") is None or r.description in kwargs["descriptions"]]
+
+    def product_totals(self, account_id, product, **kwargs):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(purchases=0, total_spent=0, quantity_by_unit={})
+
+    def price_series(self, account_id, **kwargs):
+        return self.rows
+
+    def spending_summary(self, account_id, **kwargs):
+        from decimal import Decimal
+        from types import SimpleNamespace
+
+        return SimpleNamespace(total=Decimal("422.45"), count=7)
+
+    def pending_review_count(self, account_id):
+        return 0
+
+
+def item_row(description, day, unit_price, establishment="Loja"):
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        document_id=uuid4(), original_filename=f"{day}.jpg", description=description, establishment=establishment,
+        occurred_at=day, quantity=Decimal("1"), unit="UN", unit_price=Decimal(unit_price), total_price=Decimal(unit_price),
+    )
+
+
+def test_price_history_counts_what_the_resolver_chose():
+    from types import SimpleNamespace
+
+    from services.assistant.items import ItemResolver
+    from services.assistant.tools import AssistantTools
+
+    rows = [item_row("CSCOX LAR C/DORSO", date(2026, 11, 8), "8.19"), item_row("CARNE BOV PED", date(2026, 11, 8), "49.90")]
+    queries = FakeQueries(names=["CSCOX LAR C/DORSO", "CARNE BOV PED"], rows=rows)
+    plan = normalize_plan(QueryPlan(intent=Intent.PRICE_HISTORY, product="frango", start_date=date(2026, 11, 1),
+                                    end_date=TODAY), "E o frango?", TODAY)
+
+    output = AssistantTools(queries, search=None, resolver=ItemResolver(FakeLLM(matches=[1]))).run(
+        plan, SimpleNamespace(account_id=uuid4()), TODAY
+    )
+
+    assert output.tool == "price_history"
+    assert [c["produto"] for c in output.data["compras"]] == ["CSCOX LAR C/DORSO"]
+    assert output.data["itens_considerados"] == ["CSCOX LAR C/DORSO"]
+    assert ("vocabulary", date(2026, 11, 1), date(2026, 11, 30)) in queries.calls
+
+
+def test_comparison_lists_both_periods():
+    from types import SimpleNamespace
+
+    from services.assistant.tools import AssistantTools
+
+    queries = FakeQueries(rows=[item_row("TOMATE", date(2026, 11, 6), "12.90")])
+    plan = normalize_plan(
+        QueryPlan(intent=Intent.PRICE_HISTORY, product="tomate", start_date=date(2026, 11, 1), end_date=TODAY,
+                  compare_start_date=date(2026, 10, 1), compare_end_date=date(2026, 10, 31)),
+        "compare o tomate deste mês com o passado", TODAY,
+    )
+
+    output = AssistantTools(queries, search=None).run(plan, SimpleNamespace(account_id=uuid4()), TODAY)
+
+    assert output.data["comparacao"]["periodo"] == "de 01/10/2026 a 31/10/2026"
+    assert ("items", None, date(2026, 10, 1)) in queries.calls
+
+
+def test_price_changes_compare_first_and_last_purchase():
+    from types import SimpleNamespace
+
+    from services.assistant.tools import AssistantTools, _product_key
+
+    rows = [
+        item_row("FLOCAO DE MILHO CORIN 1,000", date(2026, 11, 1), "2.55"),
+        item_row("TOMATE LONGA VIDA KG", date(2026, 11, 6), "12.90"),
+        item_row("ALFACE COMUM MC", date(2026, 11, 1), "4.19"),
+        item_row("ALFACE COMUM MC", date(2026, 11, 11), "4.19"),
+        item_row("TOMATE LONGA VIDA kg", date(2026, 11, 11), "8.95"),
+        item_row("FLOCAO DE MILHO CORIN", date(2026, 11, 11), "2.59"),
+        item_row("SO UMA VEZ", date(2026, 11, 11), "1.00"),
+    ]
+
+    output = AssistantTools(FakeQueries(rows=rows), search=None).run(
+        QueryPlan(intent=Intent.PRICE_CHANGES), SimpleNamespace(account_id=uuid4()), TODAY
+    )
+
+    assert _product_key("TOMATE LONGA VIDA kg") == _product_key("TOMATE LONGA VIDA KG") == "TOMATE LONGA VIDA"
+    up, down = output.data["ficaram_mais_caros"], output.data["ficaram_mais_baratos"]
+    assert [(c["produto"], c["variacao"]) for c in up] == [("FLOCAO DE MILHO CORIN", "+1,6%")]
+    assert [(c["produto"], c["variacao"]) for c in down] == [("TOMATE LONGA VIDA kg", "-30,6%")]
+    assert (output.data["mesmo_preco"], output.data["produtos_comparados"]) == (1, 3)
+    assert output.data["gasto_total_no_filtro"] == "R$ 422,45"  # "how much did I spend ... and what got more expensive?"
+
+
+def test_a_definition_repeats_the_previous_plan():
+    from services.assistant.planner import clarifies_previous
+
+    previous = {"intent": "price_history", "product": "legumes", "start_date": "2026-11-01", "end_date": "2026-11-30"}
+
+    repeated = clarifies_previous(previous, "Legumes são tomates, cebolas e etc")
+
+    assert (repeated.intent, repeated.product, repeated.start_date) == (Intent.PRICE_HISTORY, "legumes", date(2026, 11, 1))
+    assert clarifies_previous(previous, "obrigado!") is None
+    assert clarifies_previous(None, "legumes") is None
+
+
+@pytest.mark.parametrize(
+    ("text", "broken"),
+    [
+        ("analysis:We have a user query", True),
+        ("Águas de Teres " + "Ter " * 40, True),
+        ("| Produto | Fonte |\n|---|---|\n" + "| X | [D1] |\n" * 40, False),
+        ("Você gastou R$ 50,77 com frango [D1].", False),
+    ],
+)
+def test_degenerate_answers_are_model_failures(text, broken):
+    from services.llm_router import is_degenerate
+
+    assert is_degenerate(text) is broken
 
 
 def test_answer_without_citations_lists_the_sources():

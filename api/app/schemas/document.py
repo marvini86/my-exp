@@ -2,6 +2,8 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict
 
 from models.document import ProcessingStatus
@@ -22,6 +24,10 @@ class DocumentResponse(BaseModel):
     updated_at: datetime
     # Postponed extraction (e.g. free AI daily limit): when the worker retries.
     next_attempt_at: datetime | None = None
+    # Doubtful reading: left out of the totals until someone confirms it (POST .../review).
+    needs_review: bool = False
+    # Same invoice (access key) as another document: no entry was created.
+    duplicate_of: UUID | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -50,6 +56,17 @@ class DocumentItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ReviewReason(BaseModel):
+    """Why the reading is pending. The interface builds the message from the code."""
+
+    code: Literal["items_total_mismatch", "item_count_mismatch", "possible_duplicate"]
+    items_total: Decimal | None = None
+    total: Decimal | None = None
+    read: int | None = None
+    printed: int | None = None
+    document_id: UUID | None = None
+
+
 class DocumentDetailResponse(DocumentResponse):
     """Document + what was extracted from it.
 
@@ -59,3 +76,4 @@ class DocumentDetailResponse(DocumentResponse):
 
     entries: list[EntryResponse]
     items: list[DocumentItemResponse]
+    review_reasons: list[ReviewReason] = []

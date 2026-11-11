@@ -6,6 +6,7 @@ Each tool returns:
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -15,6 +16,7 @@ from uuid import UUID
 from core.account_context import AccountContext
 from core.exceptions import ServiceUnavailableError
 from repositories.financial_queries import FinancialQueryRepository
+from services.assistant.items import ItemResolver, plain
 from services.assistant.planner import Intent, QueryPlan, bills_since
 from services.indexing import DOCUMENT_TYPE_LABELS, PAYMENT_STATUS_LABELS, format_brl
 from services.search import SearchService
@@ -64,13 +66,21 @@ def _date(value: date | None) -> str | None:
 
 
 def _period(plan: QueryPlan) -> str:
-    if plan.start_date and plan.end_date:
-        return f"de {_date(plan.start_date)} a {_date(plan.end_date)}"
-    if plan.start_date:
-        return f"a partir de {_date(plan.start_date)}"
-    if plan.end_date:
-        return f"até {_date(plan.end_date)}"
+    return _span(plan.start_date, plan.end_date)
+
+
+def _span(start: date | None, end: date | None) -> str:
+    if start and end:
+        return f"de {_date(start)} a {_date(end)}"
+    if start:
+        return f"a partir de {_date(start)}"
+    if end:
+        return f"até {_date(end)}"
     return "todo o histórico"
+
+
+def _has_comparison(plan: QueryPlan) -> bool:
+    return bool(plan.compare_start_date and plan.compare_end_date)
 
 
 def _types_label(plan: QueryPlan) -> str | None:
@@ -89,10 +99,38 @@ def _quantity(value: Decimal | None) -> str | None:
     return None if value is None else str(value.normalize())
 
 
+@dataclass(frozen=True)
+class _ItemChoice:
+    """Items chosen by name (None = text search) and the names the choice evaluated."""
+
+    descriptions: list[str] | None = None
+    seen: list[str] | None = None
+
+    def query_args(self) -> dict[str, Any]:
+        return {"descriptions": self.descriptions, "seen": self.seen}
+
+
+MAX_LISTED_ITEMS = 20
+MAX_DOCUMENTS_WITH_ITEMS = 3
+MAX_ITEMS_PER_DOCUMENT = 40
+MAX_PRICE_CHANGES = 8
+
+# "TOMATE LONGA VIDA KG" and "TOMATE LONGA VIDA kg", "FLOCAO DE MILHO CORIN 1,000" and "FLOCAO DE
+# MILHO CORIN" are the same product: unit and loose numbers at the end are not compared.
+_TRAILING_NOISE = re.compile(r"(\s+(KG|UN|UND|G|L|ML|CX|PCT|[\d.,]+))+$")
+
+
+def _product_key(description: str) -> str:
+    return _TRAILING_NOISE.sub("", plain(description))
+
+
 class AssistantTools:
-    def __init__(self, queries: FinancialQueryRepository, search: SearchService) -> None:
+    def __init__(
+        self, queries: FinancialQueryRepository, search: SearchService, resolver: ItemResolver | None = None
+    ) -> None:
         self.queries = queries
         self.search = search
+        self.resolver = resolver
 
     def run(self, plan: QueryPlan, context: AccountContext, today: date) -> ToolOutput:
         handlers = {
@@ -100,6 +138,7 @@ class AssistantTools:
             Intent.PRICE_HISTORY: self._price_history,
             Intent.LAST_PURCHASE: self._last_purchase,
             Intent.TOP_ITEMS: self._top_items,
+            Intent.PRICE_CHANGES: self._price_changes,
             Intent.BILLS_COMPARISON: self._bills_comparison,
             Intent.LIST_DOCUMENTS: self._list_documents,
             Intent.DOCUMENT_SEARCH: self._document_search,
@@ -116,7 +155,14 @@ class AssistantTools:
                 fallback.data["observacao"] = (
                     f"Nenhum item com o nome '{plan.product}'. Trechos dos documentos relacionados ao tema:"
                 )
-                return fallback
+                output = fallback
+        return self._with_pending_review(output, context)
+
+    def _with_pending_review(self, output: ToolOutput, context: AccountContext) -> ToolOutput:
+        """Receipts with a doubtful reading are left out of the numbers: the writer mentions it in one sentence."""
+        pending = self.queries.pending_review_count(context.account_id)
+        if pending:
+            output.data["notas_pendentes_de_revisao"] = pending
         return output
 
     def _spending_summary(self, plan: QueryPlan, context: AccountContext, today: date) -> ToolOutput:
@@ -150,14 +196,53 @@ class AssistantTools:
                 for row in summary.largest
             ],
         }
+        if _has_comparison(plan):
+            other = self.queries.spending_summary(
+                context.account_id,
+                start=plan.compare_start_date,
+                end=plan.compare_end_date,
+                document_types=[t.value for t in plan.document_types] or None,
+                establishment=plan.establishment,
+            )
+            data["comparacao"] = {
+                "periodo": _span(plan.compare_start_date, plan.compare_end_date),
+                "total_gasto": format_brl(other.total),
+                "quantidade_de_lancamentos": other.count,
+                "diferenca": format_brl(summary.total - other.total),
+            }
+            data["has_results"] = data["has_results"] or other.count > 0
         return ToolOutput("spending_summary", data, refs.sources)
 
-    def _items(self, plan: QueryPlan, context: AccountContext, order: str) -> tuple[list[dict], _SourceRegistry]:
-        refs = _SourceRegistry()
+    def _choose_items(self, plan: QueryPlan, context: AccountContext) -> _ItemChoice:
+        """Chooses, from the account vocabulary, the items that are the product (chicken → CSCOX...).
+        Without AI available (or without a choice), text search is used."""
+        if self.resolver is None or not plan.product:
+            return _ItemChoice()
+        # Vocabulary of the period (and of the comparison period, which only exists with the main one closed).
+        start = min(d for d in (plan.start_date, plan.compare_start_date) if d) if plan.start_date else None
+        end = max(d for d in (plan.end_date, plan.compare_end_date) if d) if plan.end_date else None
+        names, truncated = self.queries.item_vocabulary(context.account_id, start=start, end=end)
+        if not names:
+            return _ItemChoice()
+        chosen = self.resolver.select(plan.product, plan.search_query or plan.product, names)
+        if not chosen:
+            # AI unavailable, or nothing chosen: text search may still find something.
+            return _ItemChoice()
+        return _ItemChoice(descriptions=chosen, seen=names if truncated else None)
+
+    def _item_rows(
+        self, plan: QueryPlan, context: AccountContext, choice: _ItemChoice, order: str, start, end, refs: _SourceRegistry
+    ) -> list[dict]:
         rows = self.queries.items_matching(
-            context.account_id, plan.product or "", start=plan.start_date, end=plan.end_date, order=order, limit=10
+            context.account_id,
+            plan.product or "",
+            start=start,
+            end=end,
+            order=order,
+            limit=MAX_LISTED_ITEMS,
+            **choice.query_args(),
         )
-        items = [
+        return [
             {
                 "fonte": refs.ref(row.document_id, row.original_filename),
                 "produto": row.description,
@@ -170,27 +255,50 @@ class AssistantTools:
             }
             for row in rows
         ]
-        return items, refs
+
+    def _items(
+        self, plan: QueryPlan, context: AccountContext, order: str, choice: _ItemChoice | None = None
+    ) -> tuple[list[dict], _SourceRegistry]:
+        refs = _SourceRegistry()
+        choice = choice if choice is not None else self._choose_items(plan, context)
+        return self._item_rows(plan, context, choice, order, plan.start_date, plan.end_date, refs), refs
+
+    def _totals(self, plan: QueryPlan, context: AccountContext, choice: _ItemChoice, start, end) -> dict:
+        totals = self.queries.product_totals(
+            context.account_id, plan.product or "", start=start, end=end, **choice.query_args()
+        )
+        return {
+            "vezes_comprado": totals.purchases,
+            "total_gasto": format_brl(totals.total_spent),
+            "quantidade_total": {unit: _quantity(qty) for unit, qty in totals.quantity_by_unit.items()},
+        }
 
     def _price_history(self, plan: QueryPlan, context: AccountContext, today: date) -> ToolOutput:
-        items, refs = self._items(plan, context, order="cheapest")
-        totals = self.queries.product_totals(
-            context.account_id, plan.product or "", start=plan.start_date, end=plan.end_date
-        )
+        choice = self._choose_items(plan, context)
+        items, refs = self._items(plan, context, order="cheapest", choice=choice)
         data = {
             "has_results": bool(items),
             "produto_buscado": plan.product,
             "periodo": _period(plan),
             # Sums of ALL purchases of the product (done in the database), not only the listed ones.
-            "resumo": {
-                "vezes_comprado": totals.purchases,
-                "total_gasto": format_brl(totals.total_spent),
-                "quantidade_total": {unit: _quantity(qty) for unit, qty in totals.quantity_by_unit.items()},
-            },
+            "resumo": self._totals(plan, context, choice, plan.start_date, plan.end_date),
             "ordenado_por": "menor preço unitário primeiro",
             "mais_barato": items[0] if items else None,
             "compras": items,
         }
+        if choice.descriptions:
+            # What was counted as the product: the user can check it ("frango" = CSCOX LAR C/DORSO).
+            data["itens_considerados"] = sorted({item["produto"] for item in items})
+        if _has_comparison(plan):
+            compared = self._item_rows(
+                plan, context, choice, "cheapest", plan.compare_start_date, plan.compare_end_date, refs
+            )
+            data["comparacao"] = {
+                "periodo": _span(plan.compare_start_date, plan.compare_end_date),
+                "resumo": self._totals(plan, context, choice, plan.compare_start_date, plan.compare_end_date),
+                "compras": compared,
+            }
+            data["has_results"] = bool(items or compared)
         return ToolOutput("price_history", data, refs.sources)
 
     def _top_items(self, plan: QueryPlan, context: AccountContext, today: date) -> ToolOutput:
@@ -258,19 +366,21 @@ class AssistantTools:
 
     def _bills_comparison(self, plan: QueryPlan, context: AccountContext, today: date) -> ToolOutput:
         refs = _SourceRegistry()
-        bill_type = plan.document_types[0].value
+        bill_types = [t.value for t in plan.document_types]
         if plan.start_date or plan.end_date:
             since, until = plan.start_date, plan.end_date
         elif plan.months:
             since, until = bills_since(plan.months, today), None
         else:
             since, until = None, None  # full history (limited to the most recent)
-        rows = self.queries.bills_by_month(context.account_id, bill_type, since=since, until=until)
-        rows = rows[-MAX_BILLS:]
+        rows = self.queries.bills_by_month(context.account_id, bill_types, since=since, until=until)
+        rows = rows[-MAX_BILLS * len(bill_types) :]
+        several = len(bill_types) > 1
 
         bills = [
             {
                 "fonte": refs.ref(row.document_id, row.original_filename),
+                "tipo": DOCUMENT_TYPE_LABELS.get(row.document_type or "", row.document_type),
                 "mes_referencia": row.occurred_at.strftime("%m/%Y"),
                 "emissao": _date(row.occurred_at),
                 "vencimento": _date(row.due_date),
@@ -283,16 +393,27 @@ class AssistantTools:
         amounts = [row.amount for row in rows]
         data = {
             "has_results": bool(rows),
-            "tipo": DOCUMENT_TYPE_LABELS.get(bill_type, bill_type),
+            "tipos": [DOCUMENT_TYPE_LABELS.get(t, t) for t in bill_types],
             "a_partir_de": _date(since) or "início do histórico",
             "ate": _date(until) or "hoje",
             "contas": bills,
-            "ultima_conta": bills[-1] if bills else None,
             "total_no_periodo": format_brl(sum(amounts, Decimal("0"))) if amounts else None,
-            "media_mensal": format_brl(sum(amounts, Decimal("0")) / len(amounts)) if amounts else None,
-            "maior": format_brl(max(amounts)) if amounts else None,
-            "menor": format_brl(min(amounts)) if amounts else None,
         }
+        if several:
+            # Average/highest/lowest mixing water and electricity mean nothing: only the latest of each type.
+            latest = {bill["tipo"]: bill for bill in bills}
+            data["ultima_conta_de_cada_tipo"] = list(latest.values())
+            missing = [DOCUMENT_TYPE_LABELS.get(t, t) for t in bill_types if DOCUMENT_TYPE_LABELS.get(t, t) not in latest]
+            data["tipos_sem_conta_enviada"] = missing
+        elif amounts:
+            data.update(
+                {
+                    "ultima_conta": bills[-1],
+                    "media_mensal": format_brl(sum(amounts, Decimal("0")) / len(amounts)),
+                    "maior": format_brl(max(amounts)),
+                    "menor": format_brl(min(amounts)),
+                }
+            )
         return ToolOutput("bills_comparison", data, refs.sources)
 
     def _list_documents(self, plan: QueryPlan, context: AccountContext, today: date) -> ToolOutput:
@@ -302,6 +423,11 @@ class AssistantTools:
             start=plan.start_date,
             end=plan.end_date,
             document_types=[t.value for t in plan.document_types] or None,
+            establishment=plan.establishment,
+        )
+        # "Mostra os produtos da nota do Sendas": the items of the first receipts come along.
+        items = self.queries.items_of_documents(
+            context.account_id, [row.document_id for row in rows[:MAX_DOCUMENTS_WITH_ITEMS]]
         )
         documents = [
             {
@@ -313,6 +439,22 @@ class AssistantTools:
                 "estabelecimento": row.establishment,
                 "enviado_em": _date(row.created_at.date()),
                 "processamento": row.processing_status,
+                **(
+                    {
+                        "itens": [
+                            {
+                                "produto": item.description,
+                                "quantidade": _quantity(item.quantity),
+                                "unidade": item.unit,
+                                "preco_unitario": format_brl(item.unit_price),
+                                "total": format_brl(item.total_price),
+                            }
+                            for item in items[row.document_id][:MAX_ITEMS_PER_DOCUMENT]
+                        ]
+                    }
+                    if row.document_id in items
+                    else {}
+                ),
             }
             for row in rows
         ]
@@ -320,10 +462,83 @@ class AssistantTools:
             "has_results": bool(documents),
             "periodo": _period(plan),
             "tipos": _types_label(plan),
+            "estabelecimento_filtrado": plan.establishment,
             "ordenado_por": "envio mais recente primeiro",
             "documentos": documents,
         }
         return ToolOutput("list_documents", data, refs.sources)
+
+    def _price_changes(self, plan: QueryPlan, context: AccountContext, today: date) -> ToolOutput:
+        """Product bought on different dates: unit price of the first vs the last purchase."""
+        refs = _SourceRegistry()
+        rows = self.queries.price_series(
+            context.account_id,
+            start=plan.start_date,
+            end=plan.end_date,
+            document_types=[t.value for t in plan.document_types] or None,
+            establishment=plan.establishment,
+        )
+        series: dict[str, list] = {}
+        for row in rows:
+            series.setdefault(_product_key(row.description), []).append(row)
+
+        changes = []
+        for purchases in series.values():
+            first, last = purchases[0], purchases[-1]
+            if first.occurred_at == last.occurred_at or not first.unit_price:
+                continue
+            percent = (last.unit_price - first.unit_price) / first.unit_price * 100
+            changes.append((percent, first, last, len(purchases)))
+
+        def describe(percent: Decimal, first, last, count: int) -> dict:
+            return {
+                "produto": last.description,
+                "antes": {
+                    "preco_unitario": format_brl(first.unit_price),
+                    "data": _date(first.occurred_at),
+                    "estabelecimento": first.establishment,
+                    "fonte": refs.ref(first.document_id, first.original_filename),
+                },
+                "depois": {
+                    "preco_unitario": format_brl(last.unit_price),
+                    "data": _date(last.occurred_at),
+                    "estabelecimento": last.establishment,
+                    "fonte": refs.ref(last.document_id, last.original_filename),
+                },
+                "variacao": f"{percent:+.1f}%".replace(".", ","),
+                "compras": count,
+            }
+
+        changes.sort(key=lambda c: c[0], reverse=True)
+        # "Quanto gastei no mercado e o que ficou mais caro?": the total for the same filter comes along.
+        spent = self.queries.spending_summary(
+            context.account_id,
+            start=plan.start_date,
+            end=plan.end_date,
+            document_types=[t.value for t in plan.document_types] or None,
+            establishment=plan.establishment,
+        )
+        data = {
+            "has_results": bool(changes),
+            "periodo": _period(plan),
+            "gasto_total_no_filtro": format_brl(spent.total),
+            "lancamentos_no_filtro": spent.count,
+            "tipos": _types_label(plan),
+            "estabelecimento_filtrado": plan.establishment,
+            "como_foi_calculado": (
+                "Só produtos comprados em pelo menos duas datas: preço unitário da primeira compra x da última "
+                "(lojas podem ser diferentes)."
+            ),
+            "como_responder": (
+                "Mostre os que ficaram mais caros (produto, antes → depois, variação). Se a pergunta for "
+                "sobre os mais caros e nenhum subiu, diga isso e mostre os que ficaram mais baratos."
+            ),
+            "ficaram_mais_caros": [describe(*c) for c in changes if c[0] > 0][:MAX_PRICE_CHANGES],
+            "ficaram_mais_baratos": [describe(*c) for c in reversed(changes) if c[0] < 0][:MAX_PRICE_CHANGES],
+            "mesmo_preco": len([c for c in changes if c[0] == 0]),
+            "produtos_comparados": len(changes),
+        }
+        return ToolOutput("price_changes", data, refs.sources)
 
     def _document_search(self, plan: QueryPlan, context: AccountContext, today: date) -> ToolOutput:
         refs = _SourceRegistry()

@@ -4,6 +4,7 @@ import { ACCESS_COOKIE, REFRESH_COOKIE, clearedSessionCookies, sessionCookies } 
 import { refreshSession } from "./auth/refresh";
 import { ApiError, apiErrorMessage, whenAvailable } from "./errors";
 import { formatBRL, formatDate, formatDateTime, formatMonth } from "./format";
+import { documentStatus, reviewReasonText } from "./labels";
 import { slugify } from "./slug";
 
 const TOKENS = { access_token: "mxa_a", refresh_token: "mxr_r", expires_in: 900, refresh_expires_in: 2592000 };
@@ -122,5 +123,18 @@ describe("whenAvailable", () => {
   it("vira o dia", () => {
     // 23:00 in Brasília + 2 h = 01:00 the next day
     expect(whenAvailable(2 * 3600, new Date("2026-11-08T02:00:00Z"))).toBe("amanhã às 01:00");
+  });
+});
+
+describe("revisão e duplicatas", () => {
+  it("selo mostra revisão e duplicata só depois de concluído", () => {
+    expect(documentStatus({ processing_status: "completed", needs_review: true }).label).toBe("Revisar");
+    expect(documentStatus({ processing_status: "completed", duplicate_of: "x" }).label).toBe("Duplicada");
+    expect(documentStatus({ processing_status: "processing", needs_review: true }).label).not.toBe("Revisar");
+  });
+
+  it("motivos viram texto em português", () => {
+    expect(reviewReasonText({ code: "items_total_mismatch", items_total: "90.00", total: "112.15" })).toContain("112,15");
+    expect(reviewReasonText({ code: "item_count_mismatch", read: 13, printed: 15 })).toBe("Foram lidos 13 itens, mas a nota informa 15.");
   });
 });

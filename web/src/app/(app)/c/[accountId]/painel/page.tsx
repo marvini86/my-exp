@@ -5,7 +5,7 @@ import Link from "next/link";
 
 import { ColumnChart, RankedBars, type Datum } from "@/components/charts";
 import { navItem } from "@/components/shell/nav";
-import { Card, EmptyState, PageHeader, buttonClass } from "@/components/ui";
+import { Alert, Card, EmptyState, PageHeader, buttonClass } from "@/components/ui";
 import { api, unwrap } from "@/lib/api/server";
 import { formatBRL, formatDate, formatMonth } from "@/lib/format";
 import {
@@ -130,6 +130,16 @@ export default async function DashboardPage({
         </EmptyState>
       ) : (
         <div className="space-y-6">
+          {summary.pending_review > 0 && (
+            <Alert tone="info">
+              {summary.pending_review === 1 ? "1 nota aguarda" : `${summary.pending_review} notas aguardam`} revisão e
+              ainda não {summary.pending_review === 1 ? "entrou" : "entraram"} nos totais.{" "}
+              <Link href={`${basePath}/documentos`} className="font-medium underline">
+                Revisar em Documentos
+              </Link>
+            </Alert>
+          )}
+
           {/* Key numbers */}
           <div className="grid gap-4 sm:grid-cols-3">
             <Card className="sm:col-span-1">
@@ -216,7 +226,12 @@ export default async function DashboardPage({
                     <span className="w-20 shrink-0 text-sm text-slate-500">{formatDate(entry.occurred_at)}</span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium text-slate-800">{entry.establishment ?? entry.description}</p>
-                      <p className="text-xs text-slate-500">{entry.category?.name ?? "Sem categoria"}</p>
+                      <p className="text-xs text-slate-500">
+                        {entry.category?.name ?? "Sem categoria"}
+                        {entry.needs_review && (
+                          <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800">em revisão</span>
+                        )}
+                      </p>
                     </div>
                     <span className="shrink-0 font-semibold tabular-nums text-slate-900">{formatBRL(entry.amount)}</span>
                     {entry.document_id && (

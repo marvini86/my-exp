@@ -5,6 +5,7 @@ become filters of these queries. All of them filter by `account_id` explicitly
 and still run under the account's RLS.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -152,6 +153,8 @@ class FinancialQueryRepository:
         filters: list[ColumnElement[bool]] = [
             FinancialEntry.account_id == account_id,
             FinancialEntry.entry_type == EntryType.EXPENSE,
+            # A doubtful reading only counts after it is confirmed.
+            FinancialEntry.needs_review.is_(False),
         ]
         if start:
             filters.append(FinancialEntry.occurred_at >= start)
@@ -201,16 +204,21 @@ class FinancialQueryRepository:
     def bills_by_month(
         self,
         account_id: UUID,
-        document_type: str,
+        document_type: str | Sequence[str],
         *,
         since: date | None = None,
         until: date | None = None,
     ) -> list[EntryRow]:
-        """Bills of the type, in chronological order (no limits = full history)."""
+        """Bills of the given type(s), in chronological order (no bounds = full history)."""
+        types = [document_type] if isinstance(document_type, str) else list(document_type)
         stmt = (
             select(FinancialEntry)
             .join(Document, (Document.id == FinancialEntry.document_id) & (Document.account_id == FinancialEntry.account_id))
-            .where(FinancialEntry.account_id == account_id, Document.document_type == document_type)
+            .where(
+                FinancialEntry.account_id == account_id,
+                Document.document_type.in_(types),
+                FinancialEntry.needs_review.is_(False),
+            )
             .order_by(FinancialEntry.occurred_at)
         )
         if since:
@@ -248,6 +256,44 @@ class FinancialQueryRepository:
 
     # -- itens ------------------------------------------------------------------
 
+    def _item_filter(
+        self, product: str, descriptions: Sequence[str] | None, seen: Sequence[str] | None = None
+    ) -> ColumnElement[bool]:
+        """Items chosen by exact name (`descriptions`, from the account vocabulary)
+        or, without them, by text search on `product`. `seen`: names the choice evaluated;
+        those left out of it (truncated vocabulary) still match by text search."""
+        if descriptions is None:
+            return _matches_product(DocumentItem.description, product)
+        chosen = DocumentItem.description.in_(list(descriptions))
+        if seen is None:
+            return chosen
+        return chosen | (_matches_product(DocumentItem.description, product) & DocumentItem.description.not_in(list(seen)))
+
+    def item_vocabulary(
+        self, account_id: UUID, *, start: date | None = None, end: date | None = None, limit: int = 400
+    ) -> tuple[list[str], bool]:
+        """Distinct item names of the account (as printed), most recently bought first.
+        Returns (names, truncated?): `truncated` means there were more than `limit`."""
+        last_seen = func.max(FinancialEntry.occurred_at)
+        stmt = (
+            select(DocumentItem.description)
+            .join(
+                FinancialEntry,
+                (FinancialEntry.id == DocumentItem.financial_entry_id)
+                & (FinancialEntry.account_id == DocumentItem.account_id),
+            )
+            .where(DocumentItem.account_id == account_id, FinancialEntry.needs_review.is_(False))
+            .group_by(DocumentItem.description)
+            .order_by(last_seen.desc(), DocumentItem.description)
+            .limit(limit + 1)
+        )
+        if start:
+            stmt = stmt.where(FinancialEntry.occurred_at >= start)
+        if end:
+            stmt = stmt.where(FinancialEntry.occurred_at <= end)
+        names = list(self.session.scalars(stmt).all())
+        return names[:limit], len(names) > limit
+
     def items_matching(
         self,
         account_id: UUID,
@@ -257,6 +303,8 @@ class FinancialQueryRepository:
         end: date | None = None,
         order: str = "cheapest",
         limit: int = 20,
+        descriptions: Sequence[str] | None = None,
+        seen: Sequence[str] | None = None,
     ) -> list[ItemRow]:
         stmt = (
             select(
@@ -276,7 +324,11 @@ class FinancialQueryRepository:
                 & (FinancialEntry.account_id == DocumentItem.account_id),
             )
             .join(Document, (Document.id == DocumentItem.document_id) & (Document.account_id == DocumentItem.account_id))
-            .where(DocumentItem.account_id == account_id, _matches_product(DocumentItem.description, product))
+            .where(
+                DocumentItem.account_id == account_id,
+                self._item_filter(product, descriptions, seen),
+                FinancialEntry.needs_review.is_(False),
+            )
         )
         if start:
             stmt = stmt.where(FinancialEntry.occurred_at >= start)
@@ -319,7 +371,11 @@ class FinancialQueryRepository:
                 & (FinancialEntry.account_id == DocumentItem.account_id),
             )
             .join(Document, (Document.id == DocumentItem.document_id) & (Document.account_id == DocumentItem.account_id))
-            .where(DocumentItem.account_id == account_id, DocumentItem.total_price.is_not(None))
+            .where(
+                DocumentItem.account_id == account_id,
+                DocumentItem.total_price.is_not(None),
+                FinancialEntry.needs_review.is_(False),
+            )
             .order_by(DocumentItem.total_price.desc(), FinancialEntry.occurred_at.desc())
             .limit(limit)
         )
@@ -359,7 +415,11 @@ class FinancialQueryRepository:
                 & (FinancialEntry.account_id == DocumentItem.account_id),
             )
             .join(Document, (Document.id == DocumentItem.document_id) & (Document.account_id == DocumentItem.account_id))
-            .where(DocumentItem.account_id == account_id, DocumentItem.total_price.is_not(None))
+            .where(
+                DocumentItem.account_id == account_id,
+                DocumentItem.total_price.is_not(None),
+                FinancialEntry.needs_review.is_(False),
+            )
             .group_by(DocumentItem.description)
             .order_by(total.desc(), DocumentItem.description)
             .limit(limit)
@@ -387,7 +447,14 @@ class FinancialQueryRepository:
         ]
 
     def product_totals(
-        self, account_id: UUID, product: str, *, start: date | None = None, end: date | None = None
+        self,
+        account_id: UUID,
+        product: str,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        descriptions: Sequence[str] | None = None,
+        seen: Sequence[str] | None = None,
     ) -> ProductTotals:
         """How much was spent on a product (sum of items), across every purchase in the filter."""
         stmt = (
@@ -397,7 +464,11 @@ class FinancialQueryRepository:
                 (FinancialEntry.id == DocumentItem.financial_entry_id)
                 & (FinancialEntry.account_id == DocumentItem.account_id),
             )
-            .where(DocumentItem.account_id == account_id, _matches_product(DocumentItem.description, product))
+            .where(
+                DocumentItem.account_id == account_id,
+                self._item_filter(product, descriptions, seen),
+                FinancialEntry.needs_review.is_(False),
+            )
             .group_by(DocumentItem.unit)
         )
         if start:
@@ -413,6 +484,14 @@ class FinancialQueryRepository:
 
     # -- documents -------------------------------------------------------------
 
+    def pending_review_count(self, account_id: UUID) -> int:
+        """Receipts with a doubtful reading that are not in the numbers yet."""
+        return self.session.scalar(
+            select(func.count(func.distinct(FinancialEntry.document_id))).where(
+                FinancialEntry.account_id == account_id, FinancialEntry.needs_review.is_(True)
+            )
+        ) or 0
+
     def list_documents(
         self,
         account_id: UUID,
@@ -420,6 +499,7 @@ class FinancialQueryRepository:
         start: date | None = None,
         end: date | None = None,
         document_types: list[str] | None = None,
+        establishment: str | None = None,
         limit: int = 20,
     ) -> list[DocumentRow]:
         reference_date = func.coalesce(FinancialEntry.occurred_at, cast(Document.created_at, Date))
@@ -449,6 +529,8 @@ class FinancialQueryRepository:
             stmt = stmt.where(reference_date <= end)
         if document_types:
             stmt = stmt.where(_type_filter(account_id, document_types))
+        if establishment:
+            stmt = stmt.where(_contains(FinancialEntry.establishment, establishment))
 
         return [
             DocumentRow(
@@ -463,6 +545,69 @@ class FinancialQueryRepository:
             )
             for row in self.session.execute(stmt).all()
         ]
+
+    def items_of_documents(self, account_id: UUID, document_ids: Sequence[UUID]) -> dict[UUID, list[DocumentItem]]:
+        """Items of each document (the position on the receipt is not stored: stable order, not the receipt's)."""
+        if not document_ids:
+            return {}
+        rows = self.session.scalars(
+            select(DocumentItem)
+            .where(DocumentItem.account_id == account_id, DocumentItem.document_id.in_(list(document_ids)))
+            .order_by(DocumentItem.document_id, DocumentItem.created_at, DocumentItem.id)
+        ).all()
+        by_document: dict[UUID, list[DocumentItem]] = {}
+        for item in rows:
+            by_document.setdefault(item.document_id, []).append(item)
+        return by_document
+
+    def price_series(
+        self,
+        account_id: UUID,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        document_types: list[str] | None = None,
+        establishment: str | None = None,
+        limit: int = 3000,
+    ) -> list[ItemRow]:
+        """Items with a unit price, oldest to newest (basis for "what got more expensive")."""
+        stmt = (
+            select(
+                DocumentItem.document_id,
+                Document.original_filename,
+                DocumentItem.description,
+                FinancialEntry.establishment,
+                FinancialEntry.occurred_at,
+                DocumentItem.quantity,
+                DocumentItem.unit,
+                DocumentItem.unit_price,
+                DocumentItem.total_price,
+            )
+            .join(
+                FinancialEntry,
+                (FinancialEntry.id == DocumentItem.financial_entry_id)
+                & (FinancialEntry.account_id == DocumentItem.account_id),
+            )
+            .join(Document, (Document.id == DocumentItem.document_id) & (Document.account_id == DocumentItem.account_id))
+            .where(
+                DocumentItem.account_id == account_id,
+                DocumentItem.unit_price.is_not(None),
+                DocumentItem.unit_price > 0,
+                FinancialEntry.needs_review.is_(False),
+            )
+            .order_by(FinancialEntry.occurred_at.desc(), DocumentItem.id)
+            .limit(limit)
+        )
+        if start:
+            stmt = stmt.where(FinancialEntry.occurred_at >= start)
+        if end:
+            stmt = stmt.where(FinancialEntry.occurred_at <= end)
+        if document_types:
+            stmt = stmt.where(_type_filter(account_id, document_types))
+        if establishment:
+            stmt = stmt.where(_contains(FinancialEntry.establishment, establishment))
+        # Most recent first within the limit; returned in chronological order.
+        return [ItemRow(*row) for row in reversed(self.session.execute(stmt).all())]
 
 
 # -- reports (dashboard) -------------------------------------------------------
@@ -555,6 +700,7 @@ class ReportQueryRepository(FinancialQueryRepository):
                 DocumentItem.account_id == account_id,
                 DocumentItem.unit_price.is_not(None),
                 _matches_product(DocumentItem.description, product),
+                FinancialEntry.needs_review.is_(False),
             )
         )
         if start:

@@ -51,6 +51,7 @@ from repositories.financial_queries import FinancialQueryRepository  # noqa: E40
 from repositories.platform_access import PlatformAccessRepository  # noqa: E402
 from repositories.vector_store import VectorStore  # noqa: E402
 from schemas.conversation import CreateConversationRequest  # noqa: E402
+from services.assistant.items import ItemResolver  # noqa: E402
 from services.assistant.service import AssistantService  # noqa: E402
 from services.assistant.tools import AssistantTools  # noqa: E402
 from services.extraction.processor import ExtractionProcessor  # noqa: E402
@@ -213,14 +214,13 @@ def main() -> None:
             document_ids = seed(session, account_id, user_id, store)
             user = session.get(User, user_id)
             context = AccountContext(account_id=account_id, user=user, role=AccountRole.OWNER)
+            llm = LLMRouter.for_purpose(settings, vision=False)
             tools = AssistantTools(
                 FinancialQueryRepository(session),
                 SearchService(DocumentRepository(session), get_embedding_router(), store),
+                ItemResolver(llm),
             )
-            service = AssistantService(
-                session, ConversationRepository(session), tools, LLMRouter.for_purpose(settings, vision=False),
-                today=lambda: EVAL_TODAY,
-            )
+            service = AssistantService(session, ConversationRepository(session), tools, llm, today=lambda: EVAL_TODAY)
             print(f"Running {len(cases)} cases (today = {EVAL_TODAY:%Y-%m-%d})...\n")
             for case in cases:
                 set_account_context(session, account_id, user_id)

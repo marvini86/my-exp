@@ -5,9 +5,10 @@ Run them after changing the assistant, the extraction prompt or the model lists.
 
 ## 1. Assistant (`evals/assistant`)
 
-31 questions (in Portuguese, like the product) over a **fixed, fictitious** set of
+37 questions (in Portuguese, like the product) over a **fixed, fictitious** set of
 11 documents (`dataset.py`, shaped like real receipts: supermarket with a discount,
-pharmacy, water, energy). Each document goes through the worker's real processor; only
+pharmacy, water, energy, abbreviated item names such as `CSCOX LAR C/DORSO` and
+`LTE INT ITALAC`). Each document goes through the worker's real processor; only
 the vision AI reading is replaced. "Today" in the evaluation is 2026-11-09. Expected
 answers live in `cases.py` and are checked by number, cited sources and planner intent.
 
@@ -19,7 +20,7 @@ migrate -database "postgres://postgres:postgres@127.0.0.1:55432/myexp_test?sslmo
 docker exec myexp-test-pg psql -U postgres -d myexp_test -c "ALTER ROLE myexp_app WITH PASSWORD 'app_test_pw';"
 
 export EVAL_DATABASE_URL=postgresql+psycopg://myexp_app:app_test_pw@127.0.0.1:55432/myexp_test
-python evals/assistant/run.py                     # everything (~8 min, ~70 text calls)
+python evals/assistant/run.py                     # everything (~10 min, ~90 text calls)
 python evals/assistant/run.py --tag produto       # a single topic
 python evals/assistant/run.py --only farmacia,luz-vencida
 ```
